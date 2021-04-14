@@ -311,7 +311,7 @@ namespace Unity.WebRTC
         /// </summary>
         /// <param name="type"></param>
         /// <param name="limitTextureSize"></param>
-        public static void Initialize(EncoderType type = EncoderType.Hardware, bool limitTextureSize = true)
+        public static void Initialize(EncoderType type = EncoderType.Hardware, bool limitTextureSize = true, bool directAudio = false)
         {
             // todo(kazuki): Add this event to avoid crash caused by hot-reload.
             // Dispose of all before reloading assembly.
@@ -342,7 +342,7 @@ namespace Unity.WebRTC
 #if UNITY_IOS && !UNITY_EDITOR
             NativeMethods.RegisterRenderingWebRTCPlugin();
 #endif
-            s_context = Context.Create(encoderType:type);
+            s_context = Context.Create(encoderType:type, useDirectAudio:directAudio);
             NativeMethods.SetCurrentContext(s_context.self);
             s_syncContext = SynchronizationContext.Current;
             var flipShader = Resources.Load<Shader>("Flip");
@@ -721,7 +721,7 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern void RegisterDebugLog(DelegateDebugLog func);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr ContextCreate(int uid, EncoderType encoderType);
+        public static extern IntPtr ContextCreate(int uid, EncoderType encoderType, bool useDirectAudio);
         [DllImport(WebRTC.Lib)]
         public static extern void ContextDestroy(int uid);
         [DllImport(WebRTC.Lib)]
