@@ -25,7 +25,7 @@ fi
 unzip -d $SOLUTION_DIR/webrtc webrtc-mac.zip 
 
 # Remove old bundle file
-if [ -f "$BUNDLE_FILE" ]; then
+if [ -d "$BUNDLE_FILE" ]; then
     rm -r "$BUNDLE_FILE"
 fi
 

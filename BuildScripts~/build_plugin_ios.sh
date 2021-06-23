@@ -98,7 +98,7 @@ xcodebuild archive \
   -configuration Release \
   -archivePath "$WEBRTC_ARCHIVE_DIR"
 
-if [ -f "$WEBRTC_FRAMEWORK_DIR/webrtc.framework" ]; then
+if [ -d "$WEBRTC_FRAMEWORK_DIR/webrtc.framework" ]; then
     rm -rvf "$WEBRTC_FRAMEWORK_DIR/webrtc.framework"
 fi
 
