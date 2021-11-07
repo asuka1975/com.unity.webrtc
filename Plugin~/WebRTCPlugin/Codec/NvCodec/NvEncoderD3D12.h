@@ -8,11 +8,13 @@ namespace webrtc
 
     class NvEncoderD3D12 : public NvEncoder {
     public:
-        NvEncoderD3D12(uint32_t nWidth, uint32_t nHeight, IGraphicsDevice* device);
-        virtual ~NvEncoderD3D12();
+        NvEncoderD3D12(uint32_t nWidth, uint32_t nHeight, IGraphicsDevice* device, UnityRenderingExtTextureFormat textureFormat);
+        ~NvEncoderD3D12() override;
     protected:
 
-        virtual void* AllocateInputResourceV(ITexture2D* tex) override;
+        void* AllocateInputResourceV(ITexture2D* tex) override;
+        void ReleaseInputResourceV(void* pResource) override {}
+
     };
 
 } // end namespace webrtc

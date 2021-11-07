@@ -11,18 +11,26 @@ namespace webrtc
     class PeerConnectionObject;
     enum class RTCSdpType;
     enum class RTCPeerConnectionEventType;
-    struct RTCError;
     struct MediaStreamEvent;
 
     using DelegateDebugLog = void(*)(const char*);
     using DelegateSetResolution = void(*)(int32*, int32*);
-    using DelegateMediaStreamOnAddTrack = void(*)(webrtc::MediaStreamInterface*, webrtc::MediaStreamTrackInterface*);
-    using DelegateMediaStreamOnRemoveTrack = void(*)(webrtc::MediaStreamInterface*, webrtc::MediaStreamTrackInterface*);
+    using DelegateMediaStreamOnAddTrack =
+        void(*)(webrtc::MediaStreamInterface*, webrtc::MediaStreamTrackInterface*);
+    using DelegateMediaStreamOnRemoveTrack =
+        void(*)(webrtc::MediaStreamInterface*, webrtc::MediaStreamTrackInterface*);
     using DelegateSetSessionDescSuccess = void(*)(PeerConnectionObject*);
-    using DelegateSetSessionDescFailure = void(*)(PeerConnectionObject*);
+    using DelegateSetSessionDescFailure =
+        void(*)(PeerConnectionObject*, webrtc::RTCErrorType, const char*);
+    using DelegateAudioReceive =
+        void(*)(webrtc::AudioTrackInterface* track,
+            const void* audio_data,
+            int size,
+            int sample_rate,
+            int number_of_channels,
+            int number_of_frames);
 
     void debugLog(const char* buf);
-    void SetResolution(int32* width, int32* length);
     extern DelegateDebugLog delegateDebugLog;
 
     enum class RTCPeerConnectionState
@@ -47,6 +55,16 @@ namespace webrtc
         Max
     };
 
+    enum class RTCSignalingState
+    {
+        Stable,
+        HaveLocalOffer,
+        HaveRemoteOffer,
+        HaveLocalPranswer,
+        HaveRemotePranswer,
+        Closed
+    };
+
     enum class RTCPeerConnectionEventType
     {
         ConnectionStateChange,
@@ -61,6 +79,7 @@ namespace webrtc
         Offer,
         PrAnswer,
         Answer,
+        Rollback
     };
 
     enum class SdpSemanticsType
@@ -99,16 +118,6 @@ namespace webrtc
         Video
     };
 
-    struct RTCError
-    {
-        RTCErrorDetailType errorDetail;
-        long sdpLineNumber;
-        long httpRequestStatusCode;
-        long sctpCauseCode;
-        unsigned long receivedAlert;
-        unsigned long sentAlert;
-    };
-
     struct RTCSessionDescription
     {
         RTCSdpType type;
@@ -138,27 +147,10 @@ namespace webrtc
         int sdpMLineIndex;
     };
 
-    struct RTCOfferOptions
+    struct RTCOfferAnswerOptions
     {
         bool iceRestart;
-        bool offerToReceiveAudio;
-        bool offerToReceiveVideo;
-    };
-
-    struct RTCDataChannelInit
-    {
-        bool reliable = false;
-        bool ordered = true;
-        int maxRetransmitTime = -1;
-        int maxRetransmits = -1;
-        char* protocol;
-        bool negotiated = false;
-        int id = -1;
-    };
-
-    struct RTCAnswerOptions
-    {
-        bool iceRestart;
+        bool voiceActivityDetection;
     };
     
 } // end namespace webrtc

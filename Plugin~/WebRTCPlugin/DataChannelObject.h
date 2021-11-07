@@ -19,14 +19,6 @@ namespace webrtc
         DataChannelObject(rtc::scoped_refptr<webrtc::DataChannelInterface> channel, PeerConnectionObject& pc);
         ~DataChannelObject();
 
-        std::string GetLabel() const
-        {
-            return dataChannel->label();
-        }
-        int GetID() const
-        {
-            return dataChannel->id();
-        }
         void Close()
         {
             dataChannel->Close();
@@ -35,6 +27,7 @@ namespace webrtc
         {
             dataChannel->Send(webrtc::DataBuffer(std::string(data)));
         }
+
         void Send(const byte* data, int len)
         {
             rtc::CopyOnWriteBuffer buf(data, len);
@@ -61,9 +54,7 @@ namespace webrtc
         DelegateOnMessage onMessage = nullptr;
         DelegateOnOpen onOpen = nullptr;
         DelegateOnClose onClose = nullptr;
-    private:
         rtc::scoped_refptr<webrtc::DataChannelInterface> dataChannel;
-        PeerConnectionObject& peerConnectionObj;
     };
 
 } // end namespace webrtc

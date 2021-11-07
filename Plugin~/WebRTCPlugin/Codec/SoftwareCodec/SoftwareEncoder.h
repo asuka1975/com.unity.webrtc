@@ -14,12 +14,13 @@ namespace webrtc
     class SoftwareEncoder : public IEncoder
     {
     public:
-        SoftwareEncoder(int _width, int _height, IGraphicsDevice* device);
+        SoftwareEncoder(int _width, int _height, IGraphicsDevice* device, UnityRenderingExtTextureFormat textureFormat);
+        virtual ~SoftwareEncoder();
         void InitV() override;
-        void SetRates(const webrtc::VideoEncoder::RateControlParameters& parameters) override {}
+        void SetRates(uint32_t bitRate, int64_t frameRate) override {}
         void UpdateSettings() override {}
         bool CopyBuffer(void* frame) override;
-        bool EncodeFrame() override;
+        bool EncodeFrame(int64_t timestamp_us) override;
         bool IsSupported() const override { return true; }
         void SetIdrFrame() override {}
         uint64 GetCurrentFrameCount() const override { return m_frameCount; }
@@ -29,6 +30,7 @@ namespace webrtc
         ITexture2D* m_encodeTex;
         int m_width = 1920;
         int m_height = 1080;
+        UnityRenderingExtTextureFormat m_textureFormat;
         uint64 m_frameCount = 0;
     };
 //---------------------------------------------------------------------------------------------------------------------

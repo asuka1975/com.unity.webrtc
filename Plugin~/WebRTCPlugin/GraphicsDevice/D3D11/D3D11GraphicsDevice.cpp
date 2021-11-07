@@ -23,16 +23,18 @@ D3D11GraphicsDevice::~D3D11GraphicsDevice() {
 
 //---------------------------------------------------------------------------------------------------------------------
 bool D3D11GraphicsDevice::InitV() {
+    m_isCudaSupport = CUDA_SUCCESS == m_cudaContext.Init(m_d3d11Device);
     return true;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 
 void D3D11GraphicsDevice::ShutdownV() {
+    m_cudaContext.Shutdown();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-ITexture2D* D3D11GraphicsDevice::CreateDefaultTextureV(uint32_t w, uint32_t h) {
+ITexture2D* D3D11GraphicsDevice::CreateDefaultTextureV(uint32_t w, uint32_t h, UnityRenderingExtTextureFormat textureFormat) {
 
     ID3D11Texture2D* texture = nullptr;
     D3D11_TEXTURE2D_DESC desc = { 0 };
@@ -50,7 +52,7 @@ ITexture2D* D3D11GraphicsDevice::CreateDefaultTextureV(uint32_t w, uint32_t h) {
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-ITexture2D* D3D11GraphicsDevice::CreateCPUReadTextureV(uint32_t w, uint32_t h) {
+ITexture2D* D3D11GraphicsDevice::CreateCPUReadTextureV(uint32_t w, uint32_t h, UnityRenderingExtTextureFormat textureFormat) {
 
     ID3D11Texture2D* texture = nullptr;
     D3D11_TEXTURE2D_DESC desc = { 0 };

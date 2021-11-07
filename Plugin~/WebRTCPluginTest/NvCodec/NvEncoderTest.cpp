@@ -1,8 +1,11 @@
 #include "pch.h"
-#include "../GraphicsDeviceTestBase.h"
-#include "../WebRTCPlugin/GraphicsDevice/ITexture2D.h"
-#include "../WebRTCPlugin/Codec/EncoderFactory.h"
-#include "../WebRTCPlugin/Codec/IEncoder.h"
+#include "GraphicsDeviceTestBase.h"
+#include "GraphicsDevice/IGraphicsDevice.h"
+#include "GraphicsDevice/ITexture2D.h"
+#include "Codec/EncoderFactory.h"
+#include "Codec/IEncoder.h"
+
+using namespace ::webrtc;
 
 namespace unity
 {
@@ -20,7 +23,7 @@ protected:
 
         const auto width = 256;
         const auto height = 256;
-        encoder_ = EncoderFactory::GetInstance().Init(width, height, m_device, encoderType);
+        encoder_ = EncoderFactory::GetInstance().Init(width, height, m_device, m_encoderType, m_textureFormat);
         EXPECT_NE(nullptr, encoder_);
     }
     void TearDown() override {
@@ -34,14 +37,14 @@ TEST_P(NvEncoderTest, IsSupported) {
 TEST_P(NvEncoderTest, CopyBuffer) {
     const auto width = 256;
     const auto height = 256;
-    const std::unique_ptr<ITexture2D> tex(m_device->CreateDefaultTextureV(width, height));
-    const auto result = encoder_->CopyBuffer(tex->GetEncodeTexturePtrV());
+    const std::unique_ptr<ITexture2D> tex(m_device->CreateDefaultTextureV(width, height, m_textureFormat));
+    const auto result = encoder_->CopyBuffer(tex->GetNativeTexturePtrV());
     EXPECT_TRUE(result);
 }
 
 TEST_P(NvEncoderTest, EncodeFrame) {
     auto before = encoder_->GetCurrentFrameCount();
-    EXPECT_TRUE(encoder_->EncodeFrame());
+    EXPECT_TRUE(encoder_->EncodeFrame(0));
     const auto after = encoder_->GetCurrentFrameCount();
     EXPECT_EQ(before + 1, after);
 }

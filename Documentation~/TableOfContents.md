@@ -1,14 +1,10 @@
-* [WebRTC](index)
-* [Tutorial](en/tutorial)
+* [WebRTC](index.md)
+* [Install package](install.md)
+* [Tutorial](tutorial.md)
+* [Samples](sample.md)
 * Reference
-    * [Video Streaming](en/videostreaming)
-    * [Audio Streaming](en/audiostreaming)
-    * [Data Channel](en/datachannel)
-* 日本語
-    * [WebRTC](jp/index)
-    * [チュートリアル](jp/tutorial)
-    * リファレンス
-        * [ビデオストリーミング](jp/videostreaming)
-        * [オーディオストリーミング](jp/audiostreaming)
-        * [データチャネル](jp/datachannel)
-        
+    * [Video Streaming](videostreaming.md)
+    * [Audio Streaming](audiostreaming.md)
+    * [Data Channel](datachannel.md)
+    * [Get Statistics](statistics.md)
+    * [WebRTC Statistics Tool](webrtcstats.md)

@@ -4,21 +4,27 @@
 
 #include <stddef.h>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 // Which platform we are on?
 // UNITY_WIN - Windows (regular win32)
 // UNITY_OSX - Mac OS X
 // UNITY_LINUX - Linux
-// UNITY_IPHONE - iOS
+// UNITY_IOS - iOS
+// UNITY_IOS_SIMULATOR - iOS Simulator
 // UNITY_ANDROID - Android
 // UNITY_METRO - WSA or UWP
 // UNITY_WEBGL - WebGL
 #if _MSC_VER
 #define UNITY_WIN 1
 #elif defined(__APPLE__)
-#if defined(__arm__) || defined(__arm64__)
-#define UNITY_IPHONE 1
-#else
+#if TARGET_OS_IOS
+#define UNITY_IOS 1
+#elif TARGET_OS_SIMULATOR
+#define UNITY_IOS_SIMULATOR 1
+#elif TARGET_OS_OSX
 #define UNITY_OSX 1
 #endif
 #elif defined(__ANDROID__)
@@ -46,13 +52,15 @@
 #define SUPPORT_D3D11 1 // comment this out if you don't have D3D11 header/library files
 #define SUPPORT_D3D12 1 // comment this out if you don't have D3D12 header/library files
 #define SUPPORT_OPENGL_UNIFIED 1
+// #define SUPPORT_OPENGL_CORE 1
 #define SUPPORT_VULKAN 1 // Requires Vulkan SDK to be installed
 #define SUPPORT_SOFTWARE_ENCODER 1
-#elif UNITY_IPHONE || UNITY_ANDROID || UNITY_WEBGL
+#elif UNITY_ANDROID
 #ifndef SUPPORT_OPENGL_ES
 #define SUPPORT_OPENGL_ES 1
 #endif
 #define SUPPORT_OPENGL_UNIFIED SUPPORT_OPENGL_ES
+#define SUPPORT_VULKAN 1
 #elif UNITY_LINUX
 #define SUPPORT_OPENGL_UNIFIED 1
 #define SUPPORT_OPENGL_CORE 1
@@ -61,8 +69,12 @@
 #define SUPPORT_SOFTWARE_ENCODER 1
 #endif
 
-#if UNITY_IPHONE || UNITY_OSX
+#if UNITY_IOS || UNITY_OSX  || UNITY_IOS_SIMULATOR
 #define SUPPORT_METAL 1
+#endif
+
+#if UNITY_LINUX || UNITY_WIN
+#define CUDA_PLATFORM 1
 #endif
 
 // COM-like Release macro

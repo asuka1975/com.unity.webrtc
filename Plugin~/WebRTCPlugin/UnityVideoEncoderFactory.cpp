@@ -1,7 +1,15 @@
 #include "pch.h"
 #include "UnityVideoEncoderFactory.h"
-
 #include "DummyVideoEncoder.h"
+
+#if UNITY_OSX || UNITY_IOS
+#import "sdk/objc/components/video_codec/RTCDefaultVideoEncoderFactory.h"
+#import "sdk/objc/native/api/video_encoder_factory.h"
+#elif UNITY_ANDROID
+#include "Codec/AndroidCodec/android_codec_factory_helper.h"
+#endif
+
+using namespace ::webrtc::H264;
 
 namespace unity
 {    
@@ -24,41 +32,62 @@ namespace webrtc
         return false;
     }
 
+    webrtc::VideoEncoderFactory* CreateEncoderFactory()
+    {
+#if UNITY_OSX || UNITY_IOS
+        return webrtc::ObjCToNativeVideoEncoderFactory(
+            [[RTCDefaultVideoEncoderFactory alloc] init]).release();
+#elif UNITY_ANDROID
+        return CreateAndroidEncoderFactory().release();
+#else
+        return new webrtc::InternalEncoderFactory();
+#endif
+    }
+
     UnityVideoEncoderFactory::UnityVideoEncoderFactory(IVideoEncoderObserver* observer)
-    : internal_encoder_factory_(new webrtc::InternalEncoderFactory())
+    : internal_encoder_factory_(CreateEncoderFactory())
+
     {
         m_observer = observer;
     }
+    
+    UnityVideoEncoderFactory::~UnityVideoEncoderFactory() = default;
 
     std::vector<webrtc::SdpVideoFormat> UnityVideoEncoderFactory::GetHardwareEncoderFormats() const
     {
-        const absl::optional<std::string> profileLevelId =
-            webrtc::H264::ProfileLevelIdToString(webrtc::H264::ProfileLevelId(webrtc::H264::kProfileConstrainedBaseline, webrtc::H264::kLevel5_1));
-        return { webrtc::SdpVideoFormat(
-            cricket::kH264CodecName,
-            { {cricket::kH264FmtpProfileLevelId, *profileLevelId},
-              {cricket::kH264FmtpLevelAsymmetryAllowed, "1"},
-              {cricket::kH264FmtpPacketizationMode, "1"} }) };
+#if CUDA_PLATFORM
+        return { webrtc::CreateH264Format(
+            webrtc::H264::kProfileConstrainedBaseline,
+            webrtc::H264::kLevel5_1, "1") };
+#else
+        auto formats = internal_encoder_factory_->GetSupportedFormats();
+        std::vector<webrtc::SdpVideoFormat> filtered;
+        std::copy_if(formats.begin(), formats.end(), std::back_inserter(filtered),
+            [](webrtc::SdpVideoFormat format) {
+                if(format.name.find("H264") == std::string::npos)
+                    return false;
+                return true;
+            });
+        return filtered;
+#endif
     }
 
 
     std::vector<webrtc::SdpVideoFormat> UnityVideoEncoderFactory::GetSupportedFormats() const
     {
-        std::vector <webrtc::SdpVideoFormat> formats = GetHardwareEncoderFormats();
-
         // todo(kazuki): should support codec other than h264 like vp8, vp9 and av1.
-        // 
+        //
         // std::vector <webrtc::SdpVideoFormat> formats2 = internal_encoder_factory_->GetSupportedFormats();
         // formats.insert(formats.end(), formats2.begin(), formats2.end());
-        
-        return formats;
+        return GetHardwareEncoderFormats();
     }
 
-    webrtc::VideoEncoderFactory::CodecInfo UnityVideoEncoderFactory::QueryVideoEncoder(const webrtc::SdpVideoFormat& format) const
+    webrtc::VideoEncoderFactory::CodecInfo UnityVideoEncoderFactory::QueryVideoEncoder(
+        const webrtc::SdpVideoFormat& format) const
     {
         if (IsFormatSupported(GetHardwareEncoderFormats(), format))
         {
-            return CodecInfo{ true, false };
+            return CodecInfo{ false };
         }
         RTC_DCHECK(IsFormatSupported(GetSupportedFormats(), format));
         return internal_encoder_factory_->QueryVideoEncoder(format);
@@ -66,19 +95,13 @@ namespace webrtc
 
     std::unique_ptr<webrtc::VideoEncoder> UnityVideoEncoderFactory::CreateVideoEncoder(const webrtc::SdpVideoFormat& format)
     {
+#if CUDA_PLATFORM
         if (IsFormatSupported(GetHardwareEncoderFormats(), format))
         {
             return std::make_unique<DummyVideoEncoder>(m_observer);
         }
-
-        std::unique_ptr<webrtc::VideoEncoder> internalEncoder;
-        // Try creating internal encoder.
-        if (IsFormatSupported(GetSupportedFormats(), format))
-        {
-            internalEncoder = internal_encoder_factory_->CreateVideoEncoder(format);
-        }
-        return internalEncoder;
+#endif
+        return internal_encoder_factory_->CreateVideoEncoder(format);
     }
-
 }
 }

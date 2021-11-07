@@ -1,43 +1,41 @@
 using System;
 using System.Collections;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 namespace Unity.WebRTC
 {
     internal class Context : IDisposable
     {
         internal IntPtr self;
-        internal Hashtable table;
+        internal WeakReferenceTable table;
 
         private int id;
         private bool disposed;
         private IntPtr renderFunction;
+        private IntPtr textureUpdateFunction;
+
+        public static Context Create(int id = 0, EncoderType encoderType = EncoderType.Hardware, bool forTest = false)
+        {
+            if (encoderType == EncoderType.Hardware && !NativeMethods.GetHardwareEncoderSupport())
+            {
+                throw new ArgumentException("Hardware encoder is not supported");
+            }
+
+            var ptr = NativeMethods.ContextCreate(id, encoderType, forTest);
+            return new Context(ptr, id);
+        }
 
         public bool IsNull
         {
             get { return self == IntPtr.Zero; }
         }
 
-        public static implicit operator bool(Context v)
-        {
-            return v.self != IntPtr.Zero;
-        }
-
-        public static bool ToBool(Context v)
-        {
-            return v;
-        }
-
-        public static Context Create(int id = 0, EncoderType encoderType = EncoderType.Hardware)
-        {
-            var ptr = NativeMethods.ContextCreate(id, encoderType);
-            return new Context(ptr, id);
-        }
-
         private Context(IntPtr ptr, int id)
         {
             self = ptr;
             this.id = id;
-            this.table = new Hashtable();
+            this.table = new WeakReferenceTable();
         }
 
         ~Context()
@@ -53,10 +51,12 @@ namespace Unity.WebRTC
             }
             if (self != IntPtr.Zero)
             {
-                foreach(var value in table.Values)
+                foreach (var value in table.CopiedValues)
                 {
+                    if (value == null)
+                        continue;
                     var disposable = value as IDisposable;
-                    disposable.Dispose();
+                    disposable?.Dispose();
                 }
                 table.Clear();
 
@@ -67,11 +67,17 @@ namespace Unity.WebRTC
             GC.SuppressFinalize(this);
         }
 
-        public CodecInitializationResult GetCodecInitializationResult()
+        public void AddRefPtr(IntPtr ptr)
         {
-            return NativeMethods.ContextGetCodecInitializationResult(self);
+            NativeMethods.ContextAddRefPtr(self, ptr);
         }
-        
+
+
+        public void DeleteRefPtr(IntPtr ptr)
+        {
+            NativeMethods.ContextDeleteRefPtr(self, ptr);
+        }
+
         public EncoderType GetEncoderType()
         {
             return NativeMethods.ContextGetEncoderType(self);
@@ -92,13 +98,33 @@ namespace Unity.WebRTC
             NativeMethods.ContextDeletePeerConnection(self, ptr);
         }
 
-        public void PeerConnectionSetLocalDescription(IntPtr ptr, ref RTCSessionDescription desc)
+        public RTCError PeerConnectionSetLocalDescription(
+            IntPtr ptr, ref RTCSessionDescription desc)
         {
-            NativeMethods.PeerConnectionSetLocalDescription(self, ptr, ref desc);
+            IntPtr ptrError = IntPtr.Zero;
+            RTCErrorType errorType = NativeMethods.PeerConnectionSetLocalDescription(
+                self, ptr, ref desc, ref ptrError);
+            string message = ptrError != IntPtr.Zero ? ptrError.AsAnsiStringWithFreeMem() : null;
+            return new RTCError { errorType = errorType, message = message };
         }
-        public void PeerConnectionSetRemoteDescription(IntPtr ptr, ref RTCSessionDescription desc)
+
+        public RTCError PeerConnectionSetLocalDescription(IntPtr ptr)
         {
-            NativeMethods.PeerConnectionSetRemoteDescription(self, ptr, ref desc);
+            IntPtr ptrError = IntPtr.Zero;
+            RTCErrorType errorType =
+                NativeMethods.PeerConnectionSetLocalDescriptionWithoutDescription(self, ptr, ref ptrError);
+            string message = ptrError != IntPtr.Zero ? ptrError.AsAnsiStringWithFreeMem() : null;
+            return new RTCError { errorType = errorType, message = message };
+        }
+
+        public RTCError PeerConnectionSetRemoteDescription(
+            IntPtr ptr, ref RTCSessionDescription desc)
+        {
+            IntPtr ptrError = IntPtr.Zero;
+            RTCErrorType errorType = NativeMethods.PeerConnectionSetRemoteDescription(
+                self, ptr, ref desc, ref ptrError);
+            string message = ptrError != IntPtr.Zero ? ptrError.AsAnsiStringWithFreeMem() : null;
+            return new RTCError { errorType = errorType, message = message };
         }
 
         public void PeerConnectionRegisterOnSetSessionDescSuccess(IntPtr ptr, DelegateNativePeerConnectionSetSessionDescSuccess callback)
@@ -111,7 +137,32 @@ namespace Unity.WebRTC
             NativeMethods.PeerConnectionRegisterOnSetSessionDescFailure(self, ptr, callback);
         }
 
-        public IntPtr CreateDataChannel(IntPtr ptr, string label, ref RTCDataChannelInit options)
+        public IntPtr PeerConnectionAddTransceiver(IntPtr pc, IntPtr track)
+        {
+            return NativeMethods.PeerConnectionAddTransceiver(self, pc, track);
+        }
+
+        public IntPtr PeerConnectionAddTransceiverWithType(IntPtr pc, TrackKind kind)
+        {
+            return NativeMethods.PeerConnectionAddTransceiverWithType(self, pc, kind);
+        }
+
+        public IntPtr PeerConnectionGetReceivers(IntPtr ptr, out ulong length)
+        {
+            return NativeMethods.PeerConnectionGetReceivers(self, ptr, out length);
+        }
+
+        public IntPtr PeerConnectionGetSenders(IntPtr ptr, out ulong length)
+        {
+            return NativeMethods.PeerConnectionGetSenders(self, ptr, out length);
+        }
+
+        public IntPtr PeerConnectionGetTransceivers(IntPtr ptr, out ulong length)
+        {
+            return NativeMethods.PeerConnectionGetTransceivers(self, ptr, out length);
+        }
+
+        public IntPtr CreateDataChannel(IntPtr ptr, string label, ref RTCDataChannelInitInternal options)
         {
             return NativeMethods.ContextCreateDataChannel(self, ptr, label, ref options);
         }
@@ -126,19 +177,35 @@ namespace Unity.WebRTC
             return NativeMethods.ContextCreateMediaStream(self, label);
         }
 
-        public void DeleteMediaStream(MediaStream stream)
+        public void RegisterMediaStreamObserver(MediaStream stream)
         {
-            NativeMethods.ContextDeleteMediaStream(self, stream.self);
+            NativeMethods.ContextRegisterMediaStreamObserver(self, stream.GetSelfOrThrow());
         }
 
-        public void MediaStreamRegisterOnAddTrack(IntPtr stream, DelegateNativeMediaStreamOnAddTrack callback)
+        public void UnRegisterMediaStreamObserver(MediaStream stream)
         {
-            NativeMethods.MediaStreamRegisterOnAddTrack(self, stream, callback);
+            NativeMethods.ContextRegisterMediaStreamObserver(self, stream.GetSelfOrThrow());
         }
 
-        public void MediaStreamRegisterOnRemoveTrack(IntPtr stream, DelegateNativeMediaStreamOnRemoveTrack callback)
+        public void MediaStreamRegisterOnAddTrack(MediaStream stream, DelegateNativeMediaStreamOnAddTrack callback)
         {
-            NativeMethods.MediaStreamRegisterOnRemoveTrack(self, stream, callback);
+            NativeMethods.MediaStreamRegisterOnAddTrack(self, stream.GetSelfOrThrow(), callback);
+        }
+
+        public void MediaStreamRegisterOnRemoveTrack(MediaStream stream, DelegateNativeMediaStreamOnRemoveTrack callback)
+        {
+            NativeMethods.MediaStreamRegisterOnRemoveTrack(self, stream.GetSelfOrThrow(), callback);
+        }
+
+
+        public void AudioTrackRegisterAudioReceiveCallback(IntPtr track, DelegateAudioReceive callback)
+        {
+            NativeMethods.ContextRegisterAudioReceiveCallback(self, track, callback);
+        }
+
+        public void AudioTrackUnregisterAudioReceiveCallback(IntPtr track)
+        {
+            NativeMethods.ContextUnregisterAudioReceiveCallback(self, track);
         }
 
         public IntPtr GetRenderEventFunc()
@@ -146,14 +213,29 @@ namespace Unity.WebRTC
             return NativeMethods.GetRenderEventFunc(self);
         }
 
-        public IntPtr CreateAudioTrack(string label)
+        public IntPtr GetUpdateTextureFunc()
         {
-            return NativeMethods.ContextCreateAudioTrack(self, label);
+            return NativeMethods.GetUpdateTextureFunc(self);
         }
 
-        public IntPtr CreateVideoTrack(string label, IntPtr texturePtr)
+        public IntPtr CreateVideoTrackSource()
         {
-            return NativeMethods.ContextCreateVideoTrack(self, label, texturePtr);
+            return NativeMethods.ContextCreateVideoTrackSource(self);
+        }
+
+        public IntPtr CreateAudioTrackSource()
+        {
+            return NativeMethods.ContextCreateAudioTrackSource(self);
+        }
+
+        public IntPtr CreateAudioTrack(string label, IntPtr trackSource)
+        {
+            return NativeMethods.ContextCreateAudioTrack(self, label, trackSource);
+        }
+
+        public IntPtr CreateVideoTrack(string label, IntPtr source)
+        {
+            return NativeMethods.ContextCreateVideoTrack(self, label, source);
         }
 
         public void StopMediaStreamTrack(IntPtr track)
@@ -161,15 +243,42 @@ namespace Unity.WebRTC
             NativeMethods.ContextStopMediaStreamTrack(self, track);
         }
 
-        public void DeleteMediaStreamTrack(IntPtr track)
+
+        public IntPtr CreateVideoRenderer()
         {
-            NativeMethods.ContextDeleteMediaStreamTrack(self, track);
+            return NativeMethods.CreateVideoRenderer(self);
         }
 
-        public void SetVideoEncoderParameter(IntPtr track, int width, int height)
+        public void DeleteVideoRenderer(IntPtr sink)
         {
-            NativeMethods.ContextSetVideoEncoderParameter(self, track, width, height);
+            NativeMethods.DeleteVideoRenderer(self, sink);
         }
+
+        public void DeleteStatsReport(IntPtr report)
+        {
+            NativeMethods.ContextDeleteStatsReport(self, report);
+        }
+
+        public void SetVideoEncoderParameter(IntPtr track, int width, int height, GraphicsFormat format, IntPtr texturePtr)
+        {
+            NativeMethods.ContextSetVideoEncoderParameter(self, track, width, height, format, texturePtr);
+        }
+
+        public CodecInitializationResult GetInitializationResult(IntPtr track)
+        {
+            return NativeMethods.GetInitializationResult(self, track);
+        }
+
+        public void GetSenderCapabilities(TrackKind kind, out IntPtr capabilities)
+        {
+            NativeMethods.ContextGetSenderCapabilities(self, kind, out capabilities);
+        }
+
+        public void GetReceiverCapabilities(TrackKind kind, out IntPtr capabilities)
+        {
+            NativeMethods.ContextGetReceiverCapabilities(self, kind, out capabilities);
+        }
+
 
         internal void InitializeEncoder(IntPtr track)
         {
@@ -187,6 +296,12 @@ namespace Unity.WebRTC
         {
             renderFunction = renderFunction == IntPtr.Zero ? GetRenderEventFunc() : renderFunction;
             VideoEncoderMethods.Encode(renderFunction, track);
+        }
+
+        internal void UpdateRendererTexture(uint rendererId, UnityEngine.Texture texture)
+        {
+            textureUpdateFunction = textureUpdateFunction == IntPtr.Zero ? GetUpdateTextureFunc() : textureUpdateFunction;
+            VideoDecoderMethods.UpdateRendererTexture(textureUpdateFunction, texture, rendererId);
         }
     }
 }

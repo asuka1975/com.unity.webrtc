@@ -3,12 +3,12 @@
 platforms:
   - name: win
     type: Unity::VM
-    image: renderstreaming/win10:v0.2.5-499025
+    image: renderstreaming/win10:latest
     flavor: b1.xlarge
     build_command: BuildScripts~/build_libwebrtc_win.cmd
   - name: macos
     type: Unity::VM::osx
-    image: buildfarm/mac:stable
+    image: package-ci/mac:latest
     flavor: m1.mac  
     build_command: BuildScripts~/build_libwebrtc_macos.sh
   - name: linux
@@ -16,6 +16,16 @@ platforms:
     image: cds-ops/ubuntu-18.04-base:stable
     flavor: b1.xlarge
     build_command: BuildScripts~/build_libwebrtc_linux.sh
+  - name: android
+    type: Unity::VM
+    image: renderstreaming/android-linux-build:latest
+    flavor: b1.xlarge
+    build_command: BuildScripts~/build_libwebrtc_android.sh
+  - name: ios
+    type: Unity::VM::osx
+    image: package-ci/mac:latest
+    flavor: m1.mac  
+    build_command: BuildScripts~/build_libwebrtc_ios.sh
 projects:
   - name: libwebrtc
 ---
@@ -33,9 +43,18 @@ build_{{ platform.name }}:
     build:
       paths:
         - "artifacts/**/*.zip"
+{% endfor %}
+{% endfor %}
+
+trigger_build_libwebrtc:
+  name : Trigger build libwebrtc {{ webrtc_version.name }} all platforms
+  dependencies:
+  {% for platform in platforms -%}
+  {% if platform.name != "android" -%}
+    - .yamato/upm-ci-libwebrtc.yml#build_{{ platform.name }}
+  {% endif %}
+  {% endfor %}
   triggers:
     tags:
       only:
-        - /^(r|R)(c|C)-\d+\.\d+\.\d+(-preview(\.\d+)?)?$/        
-{% endfor %}
-{% endfor %}
+        - /^(r|R)(c|C)-\d+\.\d+\.\d+(-preview(\.\d+)?)?$/

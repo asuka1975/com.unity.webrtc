@@ -15,7 +15,9 @@
 #include "api/video_codecs/sdp_video_format.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
+#include "api/video/video_sink_interface.h"
 #include "api/video/i420_buffer.h"
+#include "api/video_track_source_proxy.h"
 
 #include "rtc_base/thread.h"
 #include "rtc_base/ref_counted_object.h"
@@ -40,6 +42,7 @@
 #endif
 
 #include "media/engine/internal_encoder_factory.h"
+#include "media/engine/internal_decoder_factory.h"
 #include "media/base/h264_profile_level_id.h"
 #include "media/base/adapted_video_track_source.h"
 #include "media/base/media_channel.h"
@@ -53,45 +56,67 @@
 #include "modules/audio_device/audio_device_generic.h"
 #include "modules/audio_processing/include/audio_processing.h"
 #include "modules/video_coding/codecs/h264/include/h264.h"
+#include "modules/video_coding/codecs/vp8/include/vp8.h"
+#include "modules/video_coding/codecs/vp9/include/vp9.h"
 
 #include "common_video/h264/h264_bitstream_parser.h"
 #include "common_video/h264/h264_common.h"
 #include "common_video/include/bitrate_adjuster.h"
 
 #include "pc/media_stream_observer.h"
+#include "pc/local_audio_source.h"
 
 #pragma endregion
 
 #include "PlatformBase.h"
+#include "IUnityGraphics.h"
+#include "IUnityRenderingExtensions.h"
 
-#if defined(SUPPORT_D3D11)
+#if SUPPORT_D3D11
 #include <comdef.h>
 
 #include "d3d11.h"
 #include "IUnityGraphicsD3D11.h"
 #endif
 
-#if defined(SUPPORT_D3D12)
+#if SUPPORT_D3D12
 #include "d3d12.h"
 #include "d3d11_4.h"
 #include "IUnityGraphicsD3D12.h"
 #endif
 
-#if defined(SUPPORT_OPENGL_CORE)
+#if SUPPORT_OPENGL_CORE
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glu.h>
 #endif
 
-#if defined(SUPPORT_METAL)
+// Android platform
+#if SUPPORT_OPENGL_ES
+#include <GLES/gl.h>
+#include <GLES/glext.h>
+#include <GLES3/gl32.h>
+#include <GLES3/gl3ext.h>
+#endif
+
+#if SUPPORT_METAL
 #include "IUnityGraphicsMetal.h"
 #endif
 
-#include "IUnityGraphics.h"
-
-#if defined(SUPPORT_VULKAN)
+#if SUPPORT_VULKAN
 #include "IUnityGraphicsVulkan.h"
+#include "GraphicsDevice/Vulkan/LoadVulkanFunctions.h"
+
 #endif
+
+#if _WIN32 && _DEBUG
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#define new new(_NORMAL_BLOCK, __FILE__, __LINE__)
+#endif
+
+// audio codec isac
+#define WEBRTC_USE_BUILTIN_ISAC_FLOAT 1
 
 namespace unity
 {
@@ -109,12 +134,12 @@ namespace webrtc
 #define DebugErrorW(...)    LogPrint(L"webrtc Error: "  __VA_ARGS__)
 #define NV_RESULT(NvFunction) NvFunction == NV_ENC_SUCCESS
 
-#if !defined(UNITY_WIN)
+#if !UNITY_WIN
 #define CoTaskMemAlloc(p) malloc(p)
 #define CoTaskMemFree(p) free(p)
 #endif
 
-#if defined(SUPPORT_OPENGL_CORE)
+#if SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_ES
     void OnOpenGLDebugMessage( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam);
 #endif
     template<class ... Args>
@@ -138,11 +163,12 @@ namespace webrtc
 
     const uint32 bufferedFrameNum = 3;
 
+    /// todo(kazuki):: rename the type since it is also used to determine the decoder type.
     enum UnityEncoderType
     {
         UnityEncoderSoftware = 0,
         UnityEncoderHardware = 1,
     };
-    
+
 } // end namespace webrtc
 } // end namespace unity

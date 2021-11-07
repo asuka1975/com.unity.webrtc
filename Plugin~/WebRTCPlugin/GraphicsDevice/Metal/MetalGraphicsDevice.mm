@@ -31,9 +31,9 @@ namespace webrtc
     }
 
 //---------------------------------------------------------------------------------------------------------------------
-    ITexture2D* MetalGraphicsDevice::CreateDefaultTextureV(uint32_t w, uint32_t h) {
+    ITexture2D* MetalGraphicsDevice::CreateDefaultTextureV(uint32_t w, uint32_t h, UnityRenderingExtTextureFormat textureFormat) {
         MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
-        textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+        textureDescriptor.pixelFormat = ConvertFormat(textureFormat);
         textureDescriptor.width = w;
         textureDescriptor.height = h;
         id<MTLTexture> texture = [m_device newTextureWithDescriptor:textureDescriptor];
@@ -97,8 +97,9 @@ namespace webrtc
                         destinationOrigin:outTxtOrigin];
         
         //[TODO-sin: 2019-12-18] We don't need this if we are not using software encoding
+#if TARGET_OS_OSX
         [blit synchronizeResource:dest];
-        
+#endif
         [blit endEncoding];
         blit = nil;
         m_unityGraphicsMetal->EndCurrentCommandEncoder();
@@ -107,15 +108,18 @@ namespace webrtc
     }
 
 //---------------------------------------------------------------------------------------------------------------------
-    ITexture2D* MetalGraphicsDevice::CreateCPUReadTextureV(uint32_t width, uint32_t height)
+    ITexture2D* MetalGraphicsDevice::CreateCPUReadTextureV(uint32_t width, uint32_t height, UnityRenderingExtTextureFormat textureFormat)
     {
         MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
-        textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+        textureDescriptor.pixelFormat = ConvertFormat(textureFormat);
         textureDescriptor.width = width;
         textureDescriptor.height = height;
         textureDescriptor.allowGPUOptimizedContents = false;
-        textureDescriptor.storageMode = MTLStorageMode(MTLStorageModeManaged ) ;
-        
+#if TARGET_OS_OSX
+        textureDescriptor.storageMode = MTLStorageMode(MTLStorageModeManaged);
+#else
+        textureDescriptor.storageMode = MTLStorageMode(MTLStorageModeShared);
+#endif
         id<MTLTexture> texture = [m_device newTextureWithDescriptor:textureDescriptor];
         return new MetalTexture2D(width, height, texture);
 
@@ -124,26 +128,41 @@ namespace webrtc
 //---------------------------------------------------------------------------------------------------------------------
     rtc::scoped_refptr<webrtc::I420Buffer> MetalGraphicsDevice::ConvertRGBToI420(ITexture2D* tex){
         id<MTLTexture> nativeTex = (__bridge id<MTLTexture>)tex->GetNativeTexturePtrV();
-        const uint32_t BYTES_PER_PIXEL = 4;
-        
+        if (nil == nativeTex)
+            return nullptr;
+
+        const uint32_t BYTES_PER_PIXEL = 4;        
         const uint32_t width  = tex->GetWidth();
         const uint32_t height = tex->GetHeight();
         const uint32_t bytesPerRow = width * BYTES_PER_PIXEL;
         const uint32_t bufferSize = bytesPerRow * height;
-        
 
         std::vector<uint8_t> buffer;
         buffer.resize(bufferSize);
-        if (nil == nativeTex)
-            return nullptr;
         
-        [nativeTex getBytes:buffer.data() bytesPerRow:bytesPerRow fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+        [nativeTex getBytes:buffer.data()
+            bytesPerRow:bytesPerRow
+            fromRegion:MTLRegionMake2D(0,0,width,height)
+            mipmapLevel:0];
 
         rtc::scoped_refptr<webrtc::I420Buffer> i420_buffer = GraphicsUtility::ConvertRGBToI420Buffer(
             width, height,
             bytesPerRow, buffer.data()
         );
         return i420_buffer;
+    }
+
+//---------------------------------------------------------------------------------------------------------------------
+    MTLPixelFormat MetalGraphicsDevice::ConvertFormat(UnityRenderingExtTextureFormat format)
+    {
+        switch(format) {
+            case kUnityRenderingExtFormatB8G8R8A8_SRGB:
+                return MTLPixelFormatBGRA8Unorm_sRGB;
+            case kUnityRenderingExtFormatB8G8R8A8_UNorm:
+                return MTLPixelFormatBGRA8Unorm;
+            default:
+                return MTLPixelFormatInvalid;
+        }
     }
 
 } // end namespace webrtc

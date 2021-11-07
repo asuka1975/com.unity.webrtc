@@ -2,22 +2,19 @@
 #include "VulkanGraphicsDevice.h"
 #include "VulkanTexture2D.h"
 
-#include "IUnityGraphicsVulkan.h"
-#include "vulkan/vulkan.h"
 #include "VulkanUtility.h"
+#include "GraphicsDevice/GraphicsUtility.h"
 
 namespace unity
 {
 namespace webrtc
 {
 
-static void* s_hModule = nullptr;
-
 VulkanGraphicsDevice::VulkanGraphicsDevice( IUnityGraphicsVulkan* unityVulkan, const VkInstance instance,
     const VkPhysicalDevice physicalDevice,
     const VkDevice device, const VkQueue graphicsQueue, const uint32_t queueFamilyIndex)
     : m_unityVulkan(unityVulkan)
-    , m_instance (instance)
+    , m_instance(instance)
     , m_physicalDevice(physicalDevice)
     , m_device(device)
     , m_graphicsQueue(graphicsQueue)
@@ -27,50 +24,44 @@ VulkanGraphicsDevice::VulkanGraphicsDevice( IUnityGraphicsVulkan* unityVulkan, c
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool VulkanGraphicsDevice::InitV() {
-
-    if (s_hModule == nullptr)
-    {
-        // dll delay load
-#if defined(_WIN32)
-        HMODULE module = LoadLibrary(TEXT("vulkan-1.dll"));
-        if (module == nullptr)
-        {
-            LogPrint("vulkan-1.dll is not found. Please be sure the environment supports vulkan API.");
-            return false;
-        }
-        s_hModule = module;
-#else
+bool VulkanGraphicsDevice::InitV()
+{
+#if CUDA_PLATFORM
+    m_isCudaSupport = CUDA_SUCCESS == m_cudaContext.Init(m_instance, m_physicalDevice);
 #endif
-    }
-
-    if (CUDA_SUCCESS!=m_cudaContext.Init(m_instance, m_physicalDevice))
-        return false;
-
-    return (VK_SUCCESS == CreateCommandPool());
-
+    return VK_SUCCESS == CreateCommandPool();
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 
 void VulkanGraphicsDevice::ShutdownV() {
-    VULKAN_SAFE_DESTROY_COMMAND_POOL(m_device, m_commandPool, m_allocator);
+#if CUDA_PLATFORM
     m_cudaContext.Shutdown();
-
-    if (s_hModule)
-    {
-#if _WIN32
-        FreeLibrary((HMODULE)s_hModule);
-#else
 #endif
-        s_hModule = nullptr;
-    }
+    VULKAN_SAFE_DESTROY_COMMAND_POOL(m_device, m_commandPool, m_allocator);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
 
+std::unique_ptr<UnityVulkanImage> VulkanGraphicsDevice::AccessTexture(void* ptr) const
+{
+    std::unique_ptr<UnityVulkanImage> unityVulkanImage =
+        std::make_unique<UnityVulkanImage>();
+
+    VkImageSubresource subResource{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
+    if (!m_unityVulkan->AccessTexture(
+        ptr, &subResource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+        kUnityVulkanResourceAccess_PipelineBarrier,
+        unityVulkanImage.get()))
+    {
+        return nullptr;
+    }
+    return std::move(unityVulkanImage);
+}
+
 //Returns null if failed
-ITexture2D* VulkanGraphicsDevice::CreateDefaultTextureV(const uint32_t w, const uint32_t h) {
+ITexture2D* VulkanGraphicsDevice::CreateDefaultTextureV(const uint32_t w, const uint32_t h, UnityRenderingExtTextureFormat textureFormat) {
 
     VulkanTexture2D* vulkanTexture = new VulkanTexture2D(w, h);
     if (!vulkanTexture->Init(m_physicalDevice, m_device)) {
@@ -94,10 +85,23 @@ ITexture2D* VulkanGraphicsDevice::CreateDefaultTextureV(const uint32_t w, const 
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-ITexture2D* VulkanGraphicsDevice::CreateCPUReadTextureV(uint32_t width, uint32_t height) {
-    assert(false && "CreateCPUReadTextureV() for Vulkan is not implemented yet");
-    return nullptr;
-    
+ITexture2D* VulkanGraphicsDevice::CreateCPUReadTextureV(uint32_t w, uint32_t h, UnityRenderingExtTextureFormat textureFormat) {
+    VulkanTexture2D* vulkanTexture = new VulkanTexture2D(w, h);
+    if (!vulkanTexture->InitCpuRead(m_physicalDevice, m_device)) {
+        delete (vulkanTexture);
+        return nullptr;
+    }
+
+    //Transition to dest
+    if (VK_SUCCESS != VulkanUtility::DoImageLayoutTransition(m_device, m_commandPool, m_graphicsQueue,
+        vulkanTexture->GetImage(), vulkanTexture->GetTextureFormat(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT))
+    {
+        delete (vulkanTexture);
+        return nullptr;
+    }
+    return vulkanTexture;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -143,28 +147,35 @@ bool VulkanGraphicsDevice::CopyResourceV(ITexture2D* dest, ITexture2D* src) {
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-bool VulkanGraphicsDevice::CopyResourceFromNativeV(ITexture2D* dest, void* nativeTexturePtr) {
+bool VulkanGraphicsDevice::CopyResourceFromNativeV(
+    ITexture2D* dest, void* nativeTexturePtr) {
     if (nullptr == dest || nullptr == nativeTexturePtr)
         return false;
 
     VulkanTexture2D* destTexture = reinterpret_cast<VulkanTexture2D*>(dest);
-    UnityVulkanImage unityVulkanImage;
-    VkImageSubresource subResource { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
+    UnityVulkanImage* unityVulkanImage = static_cast<UnityVulkanImage*>(nativeTexturePtr);
 
-    if (!m_unityVulkan->AccessTexture(nativeTexturePtr, &subResource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, kUnityVulkanResourceAccess_PipelineBarrier,
-        &unityVulkanImage))
+    //Transition the src texture layout. 
+    VkResult result = VulkanUtility::DoImageLayoutTransition(
+        m_device, m_commandPool, m_graphicsQueue,
+        unityVulkanImage->image, unityVulkanImage->format,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT
+    );
+    if(result != VK_SUCCESS)
     {
         return false;
     }
+    VkImage image = unityVulkanImage->image;
 
-    if (destTexture->GetImage() == unityVulkanImage.image)
+    if (destTexture->GetImage() == image)
         return false;
 
-    //The layouts of All VulkanTexture2D should be VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, so no transition for destTex
+    // The layouts of All VulkanTexture2D should be VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    // so no transition for destTex
     VULKAN_CHECK_FAILVALUE(
         VulkanUtility::CopyImage(m_device, m_commandPool, m_graphicsQueue,
-            unityVulkanImage.image, destTexture->GetImage(), destTexture->GetWidth(), destTexture->GetHeight()),
+            image, destTexture->GetImage(), destTexture->GetWidth(), destTexture->GetHeight()),
         false
     );
 
@@ -182,9 +193,37 @@ VkResult VulkanGraphicsDevice::CreateCommandPool() {
 }
 
 //---------------------------------------------------------------------------------------------------------------------
-rtc::scoped_refptr<webrtc::I420Buffer> VulkanGraphicsDevice::ConvertRGBToI420(ITexture2D* tex) {
-    assert(false && "ConvertRGBToI420() for Vulkan is not implemented yet");
-    return nullptr;    
+rtc::scoped_refptr<webrtc::I420Buffer> VulkanGraphicsDevice::ConvertRGBToI420(
+    ITexture2D* tex)
+{
+    VulkanTexture2D* vulkanTexture = static_cast<VulkanTexture2D*>(tex);
+    const uint32_t width = tex->GetWidth();
+    const uint32_t height = tex->GetHeight();
+    const VkDeviceMemory dstImageMemory = vulkanTexture->GetTextureImageMemory();
+    VkImageSubresource subresource{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
+    VkSubresourceLayout subresourceLayout;
+    vkGetImageSubresourceLayout(m_device, vulkanTexture->GetImage(), &subresource,
+        &subresourceLayout);
+    const uint32_t rowPitch = static_cast<uint32_t>(subresourceLayout.rowPitch);
+
+    void* data;
+    std::vector<uint8_t> dst;
+    dst.resize(vulkanTexture->GetTextureImageMemorySize());
+    const VkResult result = vkMapMemory(
+        m_device, dstImageMemory, 0, VK_WHOLE_SIZE, 0, &data);
+    if(result != VK_SUCCESS) {
+        return nullptr;
+    }
+    std::memcpy(static_cast<void*>(dst.data()), data, dst.size());
+
+    vkUnmapMemory(m_device, dstImageMemory);
+
+    // convert format to i420
+    rtc::scoped_refptr<webrtc::I420Buffer> i420Buffer = GraphicsUtility::ConvertRGBToI420Buffer(
+        width, height, rowPitch, dst.data()
+    );
+
+    return i420Buffer;
 }
 
 } // end namespace webrtc
