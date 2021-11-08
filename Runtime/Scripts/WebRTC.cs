@@ -380,12 +380,12 @@ namespace Unity.WebRTC
         /// </summary>
         /// <param name="type"></param>
         /// <param name="limitTextureSize"></param>
-        public static void Initialize(EncoderType type = EncoderType.Hardware, bool limitTextureSize = true)
+        public static void Initialize(EncoderType type = EncoderType.Hardware, bool limitTextureSize = true, bool directAudio = false)
         {
             if (s_context != null)
                 throw new InvalidOperationException("Already initialized WebRTC.");
 
-            Initialize(type, limitTextureSize, false, false);
+            Initialize(type, limitTextureSize, directAudio, false);
         }
 
 
