@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -8,13 +8,23 @@ namespace Unity.WebRTC
 {
     public class VideoStreamTrack : MediaStreamTrack
     {
-        internal static List<VideoStreamTrack> tracks = new List<VideoStreamTrack>();
+        internal static ConcurrentDictionary<IntPtr, WeakReference<VideoStreamTrack>> s_tracks =
+            new ConcurrentDictionary<IntPtr, WeakReference<VideoStreamTrack>>();
 
         bool m_needFlip = false;
         Texture m_sourceTexture;
+#if !UNITY_WEBGL
         RenderTexture m_destTexture;
+#else
+        Texture m_destTexture;
+#endif
 
+#if !UNITY_WEBGL
         UnityVideoRenderer m_renderer;
+        VideoTrackSource _source;
+#else
+        public bool IsRemote { get; private set; }
+#endif
 
         private static RenderTexture CreateRenderTexture(int width, int height)
         {
@@ -24,8 +34,12 @@ namespace Unity.WebRTC
             return tex;
         }
 
-        internal VideoStreamTrack(string label, Texture source, RenderTexture dest, int width, int height)
-            : this(label, dest.GetNativeTexturePtr(), width, height, source.graphicsFormat)
+        internal VideoStreamTrack(Texture source, RenderTexture dest, int width, int height)
+#if !UNITY_WEBGL
+            : this(dest.GetNativeTexturePtr(), width, height, source.graphicsFormat)
+#else
+            : this(source.GetNativeTexturePtr(), dest.GetNativeTexturePtr(), width, height)
+#endif
         {
             m_needFlip = true;
             m_sourceTexture = source;
@@ -41,7 +55,11 @@ namespace Unity.WebRTC
         {
             get
             {
+#if !UNITY_WEBGL
                 return WebRTC.Context.GetInitializationResult(GetSelfOrThrow()) == CodecInitializationResult.Success;
+#else
+                return !IsRemote;
+#endif
             }
         }
 
@@ -49,7 +67,11 @@ namespace Unity.WebRTC
         {
             get
             {
+#if !UNITY_WEBGL
                 return m_renderer != null && m_renderer.self != IntPtr.Zero;
+#else
+                return IsRemote;
+#endif
             }
         }
 
@@ -60,21 +82,35 @@ namespace Unity.WebRTC
 
         public Texture InitializeReceiver(int width, int height)
         {
+#if !UNITY_WEBGL
             if (IsDecoderInitialized)
                 throw new InvalidOperationException("Already initialized receiver, use Texture property");
+#endif
 
             m_needFlip = true;
             var format = WebRTC.GetSupportedGraphicsFormat(SystemInfo.graphicsDeviceType);
             m_sourceTexture = new Texture2D(width, height, format, TextureCreationFlags.None);
+            //m_destTexture = CreateRenderTexture(m_sourceTexture.width, m_sourceTexture.height);
+#if !UNITY_WEBGL
+            //m_sourceTexture = new Texture2D(width, height, format, TextureCreationFlags.None);
             m_destTexture = CreateRenderTexture(m_sourceTexture.width, m_sourceTexture.height);
-
             m_renderer = new UnityVideoRenderer(WebRTC.Context.CreateVideoRenderer(), this);
+#else
+            //m_destTexture = CreateRenderTexture(width, height, renderTextureFormat);
+            var texPtr = NativeMethods.CreateNativeTexture();
+            var tex = Texture2D.CreateExternalTexture(width, height, TextureFormat.RGBA32, false, false, texPtr);
+            tex.UpdateExternalTexture(texPtr);
+            m_destTexture = tex;
+            IsRemote = true;
+#endif
+
 
             return m_destTexture;
         }
 
         internal void UpdateReceiveTexture()
         {
+#if !UNITY_WEBGL
             // [Note-kazuki: 2020-03-09] Flip vertically RenderTexture
             // note: streamed video is flipped vertical if no action was taken:
             //  - duplicate RenderTexture from its source texture
@@ -86,10 +122,14 @@ namespace Unity.WebRTC
             }
 
             WebRTC.Context.UpdateRendererTexture(m_renderer.id, m_sourceTexture);
+#else
+            NativeMethods.UpdateRendererTexture(self, m_destTexture.GetNativeTexturePtr(), m_needFlip);
+#endif
         }
 
         internal void Update()
         {
+#if !UNITY_WEBGL
             // [Note-kazuki: 2020-03-09] Flip vertically RenderTexture
             // note: streamed video is flipped vertical if no action was taken:
             //  - duplicate RenderTexture from its source texture
@@ -101,17 +141,18 @@ namespace Unity.WebRTC
             }
 
             WebRTC.Context.Encode(GetSelfOrThrow());
+#else
+            NativeMethods.RenderLocalVideotrack(GetSelfOrThrow(), m_needFlip);
+#endif
         }
 
         /// <summary>
         /// Creates a new VideoStream object.
         /// The track is created with a `source`.
         /// </summary>
-        /// <param name="label"></param>
         /// <param name="source"></param>
-        public VideoStreamTrack(string label, Texture source)
-            : this(label,
-                source,
+        public VideoStreamTrack(Texture source)
+            : this(source,
                 CreateRenderTexture(source.width, source.height),
                 source.width,
                 source.height)
@@ -119,6 +160,7 @@ namespace Unity.WebRTC
         }
 
 
+#if !UNITY_WEBGL
         /// <summary>
         /// Creates a new VideoStream object.
         /// The track is created with a source texture `ptr`.
@@ -126,28 +168,52 @@ namespace Unity.WebRTC
         ///
         /// See Also: Texture.GetNativeTexturePtr
         /// </summary>
-        /// <param name="label"></param>
         /// <param name="texturePtr"></param>
         /// <param name="width"></param>
         /// <param name="height"></param>
         /// <param name="format"></param>
-        public VideoStreamTrack(string label, IntPtr texturePtr, int width, int height, GraphicsFormat format)
-            : base(WebRTC.Context.CreateVideoTrack(label))
+        public VideoStreamTrack(IntPtr texturePtr, int width, int height, GraphicsFormat format)
+            : this(Guid.NewGuid().ToString(), new VideoTrackSource())
         {
             WebRTC.ValidateTextureSize(width, height, Application.platform, WebRTC.GetEncoderType());
             WebRTC.ValidateGraphicsFormat(format);
             WebRTC.Context.SetVideoEncoderParameter(GetSelfOrThrow(), width, height, format, texturePtr);
             WebRTC.Context.InitializeEncoder(GetSelfOrThrow());
-            tracks.Add(this);
         }
 
+        internal VideoStreamTrack(string label, VideoTrackSource source)
+            : this(WebRTC.Context.CreateVideoTrack(label, source.self))
+        {
+            _source = source;
+        }
+#else
+        /// <summary>
+        /// Creates a new VideoStream object.
+        /// The track is created with a source texture `ptr`.
+        /// It is noted that streamed video might be flipped when not action was taken. Almost case it has no problem to use other constructor instead.
+        ///
+        /// See Also: Texture.GetNativeTexturePtr
+        /// </summary>
+        /// <param name="srcTexturePtr"></param>
+        /// <param name="dstTexturePtr"></param>
+        /// <param name="width"></param>
+        /// <param name="height"></param>
+        public VideoStreamTrack(IntPtr srcTexturePtr, IntPtr dstTexturePtr, int width, int height)
+            : base(WebRTC.Context.CreateVideoTrack(srcTexturePtr, dstTexturePtr, width, height))
+        {
+            if (!s_tracks.TryAdd(self, new WeakReference<VideoStreamTrack>(this)))
+                throw new InvalidOperationException();
+        }
+#endif
         /// <summary>
         /// Creates from MediaStreamTrack object
         /// </summary>
         /// <param name="sourceTrack"></param>
+
         internal VideoStreamTrack(IntPtr sourceTrack) : base(sourceTrack)
         {
-            tracks.Add(this);
+            if (!s_tracks.TryAdd(self, new WeakReference<VideoStreamTrack>(this)))
+                throw new InvalidOperationException();
         }
 
         public override void Dispose()
@@ -159,29 +225,39 @@ namespace Unity.WebRTC
 
             if (self != IntPtr.Zero && !WebRTC.Context.IsNull)
             {
+#if !UNITY_WEBGL
                 if (IsEncoderInitialized)
                 {
                     WebRTC.Context.FinalizeEncoder(self);
                     if (RenderTexture.active == m_destTexture)
                         RenderTexture.active = null;
-                    UnityEngine.Object.DestroyImmediate(m_destTexture);
-                }
 
+                    // Unity API must be called from main thread.
+                    WebRTC.DestroyOnMainThread(m_destTexture);
+                }
+#else
+                if (RenderTexture.active == m_destTexture)
+                    RenderTexture.active = null;
+                UnityEngine.Object.DestroyImmediate(m_destTexture);
+#endif
+
+#if !UNITY_WEBGL
                 if (IsDecoderInitialized)
                 {
                     m_renderer.Dispose();
-                    UnityEngine.Object.DestroyImmediate(m_sourceTexture);
+
+                    // Unity API must be called from main thread.
+                    WebRTC.DestroyOnMainThread(m_destTexture);
                 }
 
-                if(tracks.Contains(this))
-                    tracks.Remove(this);
-                WebRTC.Context.DeleteMediaStreamTrack(self);
-                WebRTC.Table.Remove(self);
-                self = IntPtr.Zero;
-            }
+                _source?.Dispose();
+#endif
 
-            this.disposed = true;
-            GC.SuppressFinalize(this);
+
+
+                s_tracks.TryRemove(self, out var value);
+            }
+            base.Dispose();
         }
     }
 
@@ -210,17 +286,44 @@ namespace Unity.WebRTC
             var rt = new UnityEngine.RenderTexture(width, height, depthValue, format);
             rt.Create();
             cam.targetTexture = rt;
-            return new VideoStreamTrack(cam.name, rt);
+            return new VideoStreamTrack(rt);
         }
 
 
         public static MediaStream CaptureStream(this Camera cam, int width, int height, int bitrate,
             RenderTextureDepth depth = RenderTextureDepth.DEPTH_24)
         {
-            var stream = new MediaStream(WebRTC.Context.CreateMediaStream("videostream"));
+            var stream = new MediaStream();
             var track = cam.CaptureStreamTrack(width, height, bitrate, depth);
             stream.AddTrack(track);
             return stream;
+        }
+    }
+
+    internal class VideoTrackSource : RefCountedObject
+    {
+        public VideoTrackSource() : base(WebRTC.Context.CreateVideoTrackSource())
+        {
+            WebRTC.Table.Add(self, this);
+        }
+
+        ~VideoTrackSource()
+        {
+            this.Dispose();
+        }
+
+        public override void Dispose()
+        {
+            if (this.disposed)
+            {
+                return;
+            }
+
+            if (self != IntPtr.Zero && !WebRTC.Context.IsNull)
+            {
+                WebRTC.Table.Remove(self);
+            }
+            base.Dispose();
         }
     }
 

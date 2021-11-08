@@ -25,14 +25,16 @@ namespace Unity.WebRTC.RuntimeTest
                 }
             };
             config.iceTransportPolicy = RTCIceTransportPolicy.All;
+            config.iceCandidatePoolSize = 0;
+            config.bundlePolicy = RTCBundlePolicy.BundlePolicyBalanced;
             return config;
         }
 
         [SetUp]
         public void SetUp()
         {
-            var value = TestHelper.HardwareCodecSupport();
-            WebRTC.Initialize(value ? EncoderType.Hardware : EncoderType.Software);
+            var type = TestHelper.HardwareCodecSupport() ? EncoderType.Hardware : EncoderType.Software;
+            WebRTC.Initialize(type: type, limitTextureSize: true, forTest: true);
         }
 
         [TearDown]
@@ -79,15 +81,18 @@ namespace Unity.WebRTC.RuntimeTest
             var peer = new RTCPeerConnection(ref config);
 
             var config2 = peer.GetConfiguration();
-            Assert.NotNull(config.iceServers);
-            Assert.NotNull(config2.iceServers);
-            Assert.AreEqual(config.iceServers.Length, config2.iceServers.Length);
-            Assert.AreEqual(config.iceServers[0].username, config2.iceServers[0].username);
-            Assert.AreEqual(config.iceServers[0].credential, config2.iceServers[0].credential);
-            Assert.AreEqual(config.iceServers[0].urls, config2.iceServers[0].urls);
-            Assert.AreEqual(config.iceTransportPolicy, config2.iceTransportPolicy);
-            Assert.AreEqual(config.iceCandidatePoolSize, config2.iceCandidatePoolSize);
-            Assert.AreEqual(config.bundlePolicy, config2.bundlePolicy);
+            Assert.That(config.iceServers, Is.Not.Null);
+            Assert.That(config2.iceServers, Is.Not.Null);
+            Assert.That(config.iceServers.Length, Is.EqualTo(config2.iceServers.Length));
+            Assert.That(config.iceServers[0].username, Is.EqualTo(config2.iceServers[0].username));
+            Assert.That(config.iceServers[0].credential, Is.EqualTo(config2.iceServers[0].credential));
+            Assert.That(config.iceServers[0].urls, Is.EqualTo(config2.iceServers[0].urls));
+            Assert.That(config.iceTransportPolicy, Is.EqualTo(RTCIceTransportPolicy.All));
+            Assert.That(config.iceTransportPolicy, Is.EqualTo(config2.iceTransportPolicy));
+            Assert.That(config.enableDtlsSrtp, Is.Null);
+            Assert.That(config.enableDtlsSrtp, Is.EqualTo(config2.enableDtlsSrtp));
+            Assert.That(config.iceCandidatePoolSize, Is.EqualTo(config2.iceCandidatePoolSize));
+            Assert.That(config.bundlePolicy, Is.EqualTo(config2.bundlePolicy));
 
             peer.Close();
             peer.Dispose();
@@ -125,8 +130,8 @@ namespace Unity.WebRTC.RuntimeTest
         public void AddTransceiver()
         {
             var peer = new RTCPeerConnection();
-            var stream = Audio.CaptureStream();
-            var track = stream.GetAudioTracks().First();
+
+            var track = new AudioStreamTrack();
             Assert.AreEqual(0, peer.GetTransceivers().Count());
             var transceiver = peer.AddTransceiver(track);
             Assert.NotNull(transceiver);
@@ -170,7 +175,6 @@ namespace Unity.WebRTC.RuntimeTest
             }
 
             track.Dispose();
-            stream.Dispose();
             peer.Dispose();
         }
 
@@ -239,7 +243,7 @@ namespace Unity.WebRTC.RuntimeTest
         public void GetTransceivers()
         {
             var peer = new RTCPeerConnection();
-            var track = new AudioStreamTrack("audio");
+            var track = new AudioStreamTrack();
 
             var sender = peer.AddTrack(track);
             Assert.That(peer.GetTransceivers().ToList(), Has.Count.EqualTo(1));
@@ -252,13 +256,13 @@ namespace Unity.WebRTC.RuntimeTest
         [UnityTest]
         [Timeout(1000)]
         [Category("PeerConnection")]
-        [UnityPlatform(exclude = new[] { RuntimePlatform.OSXPlayer })]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.OSXPlayer, RuntimePlatform.WebGLPlayer })]
         public IEnumerator CurrentDirection()
         {
             var config = GetDefaultConfiguration();
             var peer1 = new RTCPeerConnection(ref config);
             var peer2 = new RTCPeerConnection(ref config);
-            var audioTrack = new AudioStreamTrack("audio");
+            var audioTrack = new AudioStreamTrack();
 
             var transceiver1 = peer1.AddTransceiver(TrackKind.Audio);
             transceiver1.Direction = RTCRtpTransceiverDirection.RecvOnly;
@@ -287,6 +291,17 @@ namespace Unity.WebRTC.RuntimeTest
             Assert.AreEqual(transceiver1.CurrentDirection, RTCRtpTransceiverDirection.RecvOnly);
             Assert.AreEqual(transceiver2.CurrentDirection, RTCRtpTransceiverDirection.SendOnly);
 
+            //Assert.That(transceiver2.Stop(), Is.EqualTo(RTCErrorType.None));
+            //Assert.That(transceiver2.Direction, Is.EqualTo(RTCRtpTransceiverDirection.Stopped));
+
+            // todo(kazuki):: Transceiver.CurrentDirection of Sender is not changed to "Stopped" even if waiting
+            // yield return new WaitUntil(() => transceiver2.CurrentDirection == RTCRtpTransceiverDirection.Stopped);
+            // Assert.That(transceiver2.CurrentDirection, Is.EqualTo(RTCRtpTransceiverDirection.Stopped));
+
+            // todo(kazuki):: Transceiver.CurrentDirection of Receiver is not changed to "Stopped" even if waiting
+            // yield return new WaitUntil(() => transceiver1.Direction == RTCRtpTransceiverDirection.Stopped);
+            // Assert.That(transceiver1.Direction, Is.EqualTo(RTCRtpTransceiverDirection.Stopped));
+
             audioTrack.Dispose();
             peer1.Close();
             peer2.Close();
@@ -294,8 +309,43 @@ namespace Unity.WebRTC.RuntimeTest
             peer2.Dispose();
         }
 
+
+        [UnityTest]
+        [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
+        public IEnumerator TransceiverReturnsSender()
+        {
+            RTCConfiguration config = default;
+            config.iceServers = new[] { new RTCIceServer { urls = new[] { "stun:stun.l.google.com:19302" } } };
+            var peer1 = new RTCPeerConnection(ref config);
+            var peer2 = new RTCPeerConnection(ref config);
+
+            peer1.OnIceCandidate = candidate => { peer2.AddIceCandidate(candidate); };
+            peer2.OnIceCandidate = candidate => { peer1.AddIceCandidate(candidate); };
+
+            AudioStreamTrack track1 = new AudioStreamTrack();
+            peer1.AddTrack(track1);
+
+            yield return SignalingOffer(peer1, peer2);
+
+            Assert.That(peer2.GetTransceivers().Count(), Is.EqualTo(1));
+            RTCRtpSender sender1 = peer2.GetTransceivers().First().Sender;
+            Assert.That(sender1, Is.Not.Null);
+
+            AudioStreamTrack track2 = new AudioStreamTrack();
+            RTCRtpSender sender2 = peer2.AddTrack(track2);
+            Assert.That(sender2, Is.Not.Null);
+            Assert.That(sender1, Is.EqualTo(sender2));
+
+            track1.Dispose();
+            track2.Dispose();
+            peer1.Dispose();
+            peer2.Dispose();
+        }
+
         [UnityTest]
         [Timeout(1000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public IEnumerator CreateOffer()
         {
@@ -313,6 +363,7 @@ namespace Unity.WebRTC.RuntimeTest
 
         [UnityTest]
         [Timeout(1000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public IEnumerator CreateAnswerFailed()
         {
@@ -333,6 +384,7 @@ namespace Unity.WebRTC.RuntimeTest
 
         [UnityTest]
         [Timeout(1000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public IEnumerator CreateAnswer()
         {
@@ -363,6 +415,7 @@ namespace Unity.WebRTC.RuntimeTest
 
         [UnityTest]
         [Timeout(1000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public IEnumerator SetLocalDescription()
         {
@@ -387,6 +440,11 @@ namespace Unity.WebRTC.RuntimeTest
         }
 
         [Test]
+        // TODO: Remove [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
+        // Possible fixes:
+        // - For webgl, add an async method for NativeMethods.SetDescription which returns RTCErrorType
+        // - Wait for Unity 2021 to support ES6+ syntax, which allows to wait in javascript to return the RTCErrorType
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public void SetLocalDescriptionThrowException()
         {
@@ -403,7 +461,7 @@ namespace Unity.WebRTC.RuntimeTest
         [UnityTest]
         [Timeout(1000)]
         [Category("PeerConnection")]
-        [UnityPlatform(exclude = new[] { RuntimePlatform.OSXPlayer })]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.OSXPlayer, RuntimePlatform.WebGLPlayer })]
         public IEnumerator SetRemoteDescription()
         {
             var config = GetDefaultConfiguration();
@@ -439,6 +497,11 @@ namespace Unity.WebRTC.RuntimeTest
         }
 
         [Test]
+        // TODO: Remove [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
+        // Possible fixes:
+        // - For webgl, add an async method for NativeMethods.SetDescription which returns RTCErrorType
+        // - Wait for Unity 2021 to support ES6+ syntax, which allows to wait in javascript to return the RTCErrorType
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public void SetRemoteDescriptionThrowException()
         {
@@ -455,12 +518,13 @@ namespace Unity.WebRTC.RuntimeTest
 
         [UnityTest]
         [Timeout(1000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public IEnumerator SetLocalDescriptionFailed()
         {
             var peer = new RTCPeerConnection();
             var stream = new MediaStream();
-            var track = new AudioStreamTrack("audio");
+            var track = new AudioStreamTrack();
             var sender = peer.AddTrack(track, stream);
 
             var op = peer.CreateOffer();
@@ -485,6 +549,7 @@ namespace Unity.WebRTC.RuntimeTest
 
         [UnityTest]
         [Timeout(1000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("PeerConnection")]
         public IEnumerator SetRemoteDescriptionFailed()
         {
@@ -493,7 +558,7 @@ namespace Unity.WebRTC.RuntimeTest
             var peer2 = new RTCPeerConnection(ref config);
 
             var stream = new MediaStream();
-            var track = new AudioStreamTrack("audio");
+            var track = new AudioStreamTrack();
             var sender = peer1.AddTrack(track, stream);
 
             var op1 = peer1.CreateOffer();
@@ -520,6 +585,7 @@ namespace Unity.WebRTC.RuntimeTest
 
         [UnityTest]
         [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         public IEnumerator IceConnectionStateChange()
         {
             RTCConfiguration config = default;
@@ -530,8 +596,8 @@ namespace Unity.WebRTC.RuntimeTest
             peer1.OnIceCandidate = candidate => { peer2.AddIceCandidate(candidate); };
             peer2.OnIceCandidate = candidate => { peer1.AddIceCandidate(candidate); };
 
-            MediaStream stream = Audio.CaptureStream();
-            peer1.AddTrack(stream.GetTracks().First());
+            var track = new AudioStreamTrack();
+            peer1.AddTrack(track);
 
             var op1 = peer1.CreateOffer();
             yield return op1;
@@ -559,13 +625,14 @@ namespace Unity.WebRTC.RuntimeTest
             yield return op8;
             Assert.True(op8.IsCompleted);
 
-            stream.Dispose();
+            track.Dispose();
             peer1.Close();
             peer2.Close();
         }
 
         [UnityTest]
         [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         public IEnumerator AddIceCandidate()
         {
             RTCConfiguration config = default;
@@ -579,8 +646,8 @@ namespace Unity.WebRTC.RuntimeTest
             peer1.OnIceCandidate = candidate => { peer2ReceiveCandidateQueue.Enqueue(candidate); };
             peer2.OnIceCandidate = candidate => { peer1ReceiveCandidateQueue.Enqueue(candidate); };
 
-            MediaStream stream = Audio.CaptureStream();
-            peer1.AddTrack(stream.GetTracks().First());
+            var track = new AudioStreamTrack();
+            peer1.AddTrack(track);
 
             var op1 = peer1.CreateOffer();
             yield return op1;
@@ -637,13 +704,14 @@ namespace Unity.WebRTC.RuntimeTest
 
             peer2ReceiveCandidateQueue.Clear();
 
-            stream.Dispose();
+            track.Dispose();
             peer1.Close();
             peer2.Close();
         }
 
         [UnityTest]
         [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         public IEnumerator MediaStreamTrackThrowExceptionAfterPeerDisposed()
         {
             RTCConfiguration config = default;
@@ -654,52 +722,24 @@ namespace Unity.WebRTC.RuntimeTest
             peer1.OnIceCandidate = candidate => { peer2.AddIceCandidate(candidate); };
             peer2.OnIceCandidate = candidate => { peer1.AddIceCandidate(candidate); };
 
-            MediaStreamTrack track = null;
-            MediaStream stream = Audio.CaptureStream();
-            peer1.AddTrack(stream.GetTracks().First());
+            AudioStreamTrack track = new AudioStreamTrack();
+            peer1.AddTrack(track);
 
-            peer2.OnTrack = e => { track = e.Track; };
+            MediaStreamTrack track1 = null;
+            peer2.OnTrack = e => { track1 = e.Track; };
 
             yield return SignalingOffer(peer1, peer2);
 
-            Assert.That(track, Is.Not.Null);
+            Assert.That(track1, Is.Not.Null);
             peer2.Dispose();
-            Assert.That(() => track.Id, Throws.TypeOf<InvalidOperationException>());
+            Assert.That(() => track1.Id, Throws.TypeOf<InvalidOperationException>());
             track.Dispose();
+            track1.Dispose();
         }
 
         [UnityTest]
         [Timeout(5000)]
-        public IEnumerator TransceiverReturnsSender()
-        {
-            RTCConfiguration config = default;
-            config.iceServers = new[] { new RTCIceServer { urls = new[] { "stun:stun.l.google.com:19302" } } };
-            var peer1 = new RTCPeerConnection(ref config);
-            var peer2 = new RTCPeerConnection(ref config);
-
-            peer1.OnIceCandidate = candidate => { peer2.AddIceCandidate(candidate); };
-            peer2.OnIceCandidate = candidate => { peer1.AddIceCandidate(candidate); };
-
-            MediaStream stream1 = Audio.CaptureStream();
-            peer1.AddTrack(stream1.GetTracks().First());
-
-            yield return SignalingOffer(peer1, peer2);
-
-            Assert.That(peer2.GetTransceivers().Count(), Is.EqualTo(1));
-            RTCRtpSender sender1 = peer2.GetTransceivers().First().Sender;
-            Assert.That(sender1, Is.Not.Null);
-
-            MediaStream stream2 = Audio.CaptureStream();
-            RTCRtpSender sender2 = peer2.AddTrack(stream2.GetTracks().First());
-            Assert.That(sender2, Is.Not.Null);
-            Assert.That(sender1, Is.EqualTo(sender2));
-
-            peer1.Dispose();
-            peer2.Dispose();
-        }
-
-        [UnityTest]
-        [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         public IEnumerator PeerConnectionStateChange()
         {
             RTCConfiguration config = default;
@@ -722,8 +762,8 @@ namespace Unity.WebRTC.RuntimeTest
             Assert.That(state1, Is.EqualTo(RTCPeerConnectionState.New));
             Assert.That(state2, Is.EqualTo(RTCPeerConnectionState.New));
 
-            MediaStream stream = Audio.CaptureStream();
-            peer1.AddTrack(stream.GetTracks().First());
+            AudioStreamTrack track1 = new AudioStreamTrack();
+            peer1.AddTrack(track1);
 
             var op1 = peer1.CreateOffer();
             yield return op1;
@@ -761,59 +801,69 @@ namespace Unity.WebRTC.RuntimeTest
             yield return op9;
             Assert.That(op9.IsCompleted, Is.True);
 
-            stream.Dispose();
+            track1.Dispose();
             peer2.Close();
         }
 
         [UnityTest]
         [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         public IEnumerator GetStatsReturnsReport()
         {
-            var camObj = new GameObject("Camera");
-            var cam = camObj.AddComponent<Camera>();
-            var videoStream = cam.CaptureStream(1280, 720, 0);
+            if (SystemInfo.processorType == "Apple M1")
+                Assert.Ignore("todo:: This test will hang up on Apple M1");
+
+            var stream = new MediaStream();
+
+            var go = new GameObject("Test");
+            var cam = go.AddComponent<Camera>();
+            stream.AddTrack(cam.CaptureStreamTrack(1280, 720, 0));
+
+            var source = go.AddComponent<AudioSource>();
+            source.clip = AudioClip.Create("test", 480, 2, 48000, false);
+            stream.AddTrack(new AudioStreamTrack(source));
+
             yield return new WaitForSeconds(0.1f);
 
             var test = new MonoBehaviourTest<SignalingPeers>();
-            test.component.SetStream(videoStream);
+            test.component.AddStream(0, stream);
             yield return test;
             test.component.CoroutineUpdate();
             yield return new WaitForSeconds(0.1f);
             var op = test.component.GetPeerStats(0);
             yield return op;
-            Assert.True(op.IsDone);
-            Assert.IsNotEmpty(op.Value.Stats);
-            Assert.IsNotEmpty(op.Value.Stats.Keys);
-            Assert.IsNotEmpty(op.Value.Stats.Values);
-            Assert.Greater(op.Value.Stats.Count, 0);
+            Assert.That(op.IsDone, Is.True);
+            Assert.That(op.Value.Stats, Is.Not.Empty);
+            Assert.That(op.Value.Stats.Keys, Is.Not.Empty);
+            Assert.That(op.Value.Stats.Values, Is.Not.Empty);
+            Assert.That(op.Value.Stats.Count, Is.GreaterThan(0));
 
             foreach (RTCStats stats in op.Value.Stats.Values)
             {
-                Assert.NotNull(stats);
-                Assert.Greater(stats.Timestamp, 0);
-                Assert.IsNotEmpty(stats.Id);
+                Assert.That(stats, Is.Not.Null);
+                Assert.That(stats.Timestamp, Is.GreaterThan(0));
+                Assert.That(stats.Id, Is.Not.Empty);
                 foreach (var pair in stats.Dict)
                 {
-                    Assert.IsNotEmpty(pair.Key);
+                    Assert.That(pair.Key, Is.Not.Empty);
                 }
                 StatsCheck.Test(stats);
             }
             op.Value.Dispose();
 
             test.component.Dispose();
-            foreach (var track in videoStream.GetTracks())
+            foreach (var track in stream.GetTracks())
             {
                 track.Dispose();
             }
-            // wait for disposing video track.
-            yield return 0;
-
-            videoStream.Dispose();
-            Object.DestroyImmediate(camObj);
+            stream.Dispose();
+            Object.DestroyImmediate(go);
+            Object.DestroyImmediate(test.gameObject);
         }
 
         [UnityTest]
         [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         public IEnumerator RestartIceInvokeOnNegotiationNeeded()
         {
             RTCConfiguration config = default;
@@ -824,8 +874,8 @@ namespace Unity.WebRTC.RuntimeTest
             peer1.OnIceCandidate = candidate => { peer2.AddIceCandidate(candidate); };
             peer2.OnIceCandidate = candidate => { peer1.AddIceCandidate(candidate); };
 
-            MediaStream stream = Audio.CaptureStream();
-            peer1.AddTrack(stream.GetTracks().First());
+            AudioStreamTrack track = new AudioStreamTrack();
+            peer1.AddTrack(track);
 
             yield return SignalingOffer(peer1, peer2);
 
@@ -845,13 +895,14 @@ namespace Unity.WebRTC.RuntimeTest
             yield return op10;
             Assert.That(op10.IsCompleted, Is.True);
 
-            stream.Dispose();
+            track.Dispose();
             peer1.Close();
             peer2.Close();
         }
 
         [UnityTest]
         [Timeout(5000)]
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         public IEnumerator RemoteOnRemoveTrack()
         {
             RTCConfiguration config = default;
@@ -862,8 +913,9 @@ namespace Unity.WebRTC.RuntimeTest
             peer1.OnIceCandidate = candidate => { peer2.AddIceCandidate(candidate); };
             peer2.OnIceCandidate = candidate => { peer1.AddIceCandidate(candidate); };
 
-            var stream = new MediaStream(WebRTC.Context.CreateMediaStream("audiostream"));
-            var track = new AudioStreamTrack(WebRTC.Context.CreateAudioTrack("audio"));
+            var stream = new MediaStream();
+            MediaStream receiveStream = null;
+            var track = new AudioStreamTrack();
             stream.AddTrack(track);
             RTCRtpSender sender = peer1.AddTrack(track, stream);
 
@@ -874,7 +926,7 @@ namespace Unity.WebRTC.RuntimeTest
             peer2.OnTrack = e =>
             {
                 Assert.That(e.Streams, Has.Count.EqualTo(1));
-                MediaStream receiveStream = e.Streams.First();
+                receiveStream = e.Streams.First();
                 receiveStream.OnRemoveTrack = ev => isInvokeOnRemoveTrack = true;
             };
 
@@ -893,6 +945,7 @@ namespace Unity.WebRTC.RuntimeTest
             Assert.That(op10.IsCompleted, Is.True);
 
             stream.Dispose();
+            receiveStream.Dispose();
             track.Dispose();
             peer1.Dispose();
             peer2.Dispose();

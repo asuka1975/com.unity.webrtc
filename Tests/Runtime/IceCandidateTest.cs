@@ -1,5 +1,7 @@
 using System;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace Unity.WebRTC.RuntimeTest
 {
@@ -8,8 +10,8 @@ namespace Unity.WebRTC.RuntimeTest
         [SetUp]
         public void SetUp()
         {
-            var value = TestHelper.HardwareCodecSupport();
-            WebRTC.Initialize(value ? EncoderType.Hardware : EncoderType.Software);
+            var type = TestHelper.HardwareCodecSupport() ? EncoderType.Hardware : EncoderType.Software;
+            WebRTC.Initialize(type: type, limitTextureSize: true, forTest: true);
         }
 
         [TearDown]
@@ -25,7 +27,12 @@ namespace Unity.WebRTC.RuntimeTest
             Assert.Throws<ArgumentException>(() => new RTCIceCandidate());
         }
 
+
         [Test]
+        // TODO: Remove [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
+        // Fix test for WebGL platform. WebRTC returns null for relatedAddress when type is host
+        // https://developer.mozilla.org/en-US/docs/Web/API/RTCIceCandidate/relatedAddress - is null for host
+        [UnityPlatform(exclude = new[] { RuntimePlatform.WebGLPlayer })]
         [Category("IceCandidate")]
         public void ConstructWithOption()
         {

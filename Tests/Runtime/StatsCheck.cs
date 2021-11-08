@@ -27,7 +27,7 @@ namespace Unity.WebRTC.RuntimeTest
                     Assert.IsNotEmpty(iceCandidatePairStats.transportId);
                     Assert.IsNotEmpty(iceCandidatePairStats.localCandidateId);
                     Assert.IsNotEmpty(iceCandidatePairStats.remoteCandidateId);
-                    Assert.IsNotEmpty(iceCandidatePairStats.state);
+                    Ignore.Pass(iceCandidatePairStats.state);
                     Ignore.Pass(iceCandidatePairStats.priority);
                     Ignore.Pass(iceCandidatePairStats.nominated);
                     Ignore.Pass(iceCandidatePairStats.writable);
@@ -54,7 +54,7 @@ namespace Unity.WebRTC.RuntimeTest
                     Assert.NotNull(dataChannelStats);
                     Assert.AreEqual(8, dataChannelStats.Dict.Count);
                     Assert.IsNotEmpty(dataChannelStats.label);
-                    Assert.IsNotEmpty(dataChannelStats.state);
+                    Ignore.Pass(dataChannelStats.state);
                     Ignore.Pass(dataChannelStats.protocol);
                     Ignore.Pass(dataChannelStats.messagesSent);
                     Ignore.Pass(dataChannelStats.messagesReceived);
@@ -68,7 +68,7 @@ namespace Unity.WebRTC.RuntimeTest
                     Assert.NotNull(candidateStats);
                     Assert.AreEqual(11, candidateStats.Dict.Count);
                     Assert.IsNotEmpty(candidateStats.protocol);
-                    Assert.IsNotEmpty(candidateStats.candidateType);
+                    Ignore.Pass(candidateStats.candidateType);
                     Ignore.Pass(candidateStats.ip);
                     Assert.IsNotEmpty(candidateStats.transportId);
                     Ignore.Pass(candidateStats.url);
@@ -234,14 +234,23 @@ namespace Unity.WebRTC.RuntimeTest
                 case RTCStatsType.MediaSource:
                     var mediaSourceStats = stats as RTCMediaSourceStats;
                     Assert.NotNull(mediaSourceStats);
-                    Assert.AreEqual(6, mediaSourceStats.Dict.Count);
                     Assert.IsNotEmpty(mediaSourceStats.trackIdentifier);
                     Assert.IsNotEmpty(mediaSourceStats.kind);
-                    Ignore.Pass(mediaSourceStats.width);
-                    Ignore.Pass(mediaSourceStats.height);
-                    Ignore.Pass(mediaSourceStats.frames);
-                    Ignore.Pass(mediaSourceStats.framesPerSecond);
-
+                    if (mediaSourceStats is RTCVideoSourceStats videoSourceStats)
+                    {
+                        Assert.AreEqual(6, videoSourceStats.Dict.Count);
+                        Ignore.Pass(videoSourceStats.width);
+                        Ignore.Pass(videoSourceStats.height);
+                        Ignore.Pass(videoSourceStats.frames);
+                        Ignore.Pass(videoSourceStats.framesPerSecond);
+                    }
+                    if (mediaSourceStats is RTCAudioSourceStats audioSourceStats)
+                    {
+                        Assert.AreEqual(5, audioSourceStats.Dict.Count);
+                        Ignore.Pass(audioSourceStats.audioLevel);
+                        Ignore.Pass(audioSourceStats.totalAudioEnergy);
+                        Ignore.Pass(audioSourceStats.totalSamplesDuration);
+                    }
                     break;
                 case RTCStatsType.Track:
                     var mediaStreamTrackStats = stats as RTCMediaStreamTrackStats;

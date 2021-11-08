@@ -334,7 +334,7 @@ PlayerSettings:
   m_BuildTargetGroupLightmapEncodingQuality: []
   m_BuildTargetGroupLightmapSettings: []
   m_BuildTargetNormalMapEncoding: []
-  playModeTestRunnerEnabled: 0
+  playModeTestRunnerEnabled: 1
   runPlayModeTestAsEditModeTest: 0
   actionOnDotNetUnhandledException: 1
   enableInternalProfiler: 0
@@ -342,7 +342,7 @@ PlayerSettings:
   enableCrashReportAPI: 0
   cameraUsageDescription: for test WebCamTexture
   locationUsageDescription: 
-  microphoneUsageDescription: 
+  microphoneUsageDescription: for test Microphone
   switchNMETAOverride: 
   switchNetLibKey: 
   switchSocketMemoryPoolSize: 6144

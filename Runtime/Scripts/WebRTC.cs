@@ -3,14 +3,20 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Runtime.CompilerServices;
+using System.IO;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
+#if UNITY_WEBGL
+[assembly: UnityEngine.Scripting.Preserve]
+#endif
+
 namespace Unity.WebRTC
 {
     /// <summary>
-    ///
+    /// 
     /// </summary>
     /// <seealso cref="WebRTC.Initialize(EncoderType)"/>
     public enum EncoderType
@@ -20,7 +26,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     public enum RTCErrorDetailType
     {
@@ -48,7 +54,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     /// <seealso cref="RTCPeerConnection.ConnectionState"/>
     public enum RTCPeerConnectionState : int
@@ -62,7 +68,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     /// <seealso cref="RTCPeerConnection.IceConnectionState"/>
     public enum RTCIceConnectionState : int
@@ -78,7 +84,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     /// <seealso cref="RTCPeerConnection.GatheringState"/>
     public enum RTCIceGatheringState : int
@@ -89,7 +95,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     /// <seealso cref="RTCPeerConnection.SignalingState"/>
     public enum RTCSignalingState : int
@@ -103,7 +109,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     public enum RTCErrorType
     {
@@ -162,7 +168,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     public struct RTCSessionDescription
     {
@@ -172,7 +178,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     public struct RTCOfferAnswerOptions
     {
@@ -184,6 +190,7 @@ namespace Unity.WebRTC
         /// </summary>
         [MarshalAs(UnmanagedType.U1)]
         public bool iceRestart;
+
         /// <summary>
         ///
         /// </summary>
@@ -205,7 +212,7 @@ namespace Unity.WebRTC
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     /// <seealso cref="RTCConfiguration"/>
     [Serializable]
@@ -228,43 +235,86 @@ namespace Unity.WebRTC
     public enum RTCIceTransportPolicy : int
     {
         /// <summary>
-        ///
+        /// 
         /// </summary>
         Relay = 1,
         /// <summary>
-        ///
+        /// 
         /// </summary>
         All = 3
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     /// <seealso cref="RTCPeerConnection.GetConfiguration()"/>
     /// <seealso cref="RTCPeerConnection.SetConfiguration(ref RTCConfiguration)"/>
     [Serializable]
     public struct RTCConfiguration
     {
+#if UNITY_WEBGL
         /// <summary>
-        ///
+        /// 
+        /// </summary>
+        /// public string label;
+#endif
+
+        /// <summary>
+        /// 
         /// </summary>
         public RTCIceServer[] iceServers;
         /// <summary>
-        ///
+        /// 
         /// </summary>
-        public RTCIceTransportPolicy iceTransportPolicy;
+        public RTCIceTransportPolicy? iceTransportPolicy;
+        /// <summary>
+        /// 
+        /// </summary>
+        public RTCBundlePolicy? bundlePolicy;
+        /// <summary>
+        /// 
+        /// </summary>
+        public int? iceCandidatePoolSize;
         /// <summary>
         ///
         /// </summary>
-        public RTCBundlePolicy bundlePolicy;
-        /// <summary>
-        ///
-        /// </summary>
-        public int iceCandidatePoolSize;
+        public bool? enableDtlsSrtp;
+
+        internal RTCConfiguration(ref RTCConfigurationInternal v)
+        {
+            iceServers = v.iceServers;
+            iceTransportPolicy = v.iceTransportPolicy.AsEnum<RTCIceTransportPolicy>();
+            bundlePolicy = v.bundlePolicy.AsEnum<RTCBundlePolicy>();
+            iceCandidatePoolSize = v.iceCandidatePoolSize;
+            enableDtlsSrtp = v.enableDtlsSrtp;
+        }
+
+        internal RTCConfigurationInternal Cast()
+        {
+            RTCConfigurationInternal instance = new RTCConfigurationInternal
+            {
+                iceServers = this.iceServers,
+                iceTransportPolicy = OptionalInt.FromEnum(this.iceTransportPolicy),
+                bundlePolicy = OptionalInt.FromEnum(this.bundlePolicy),
+                iceCandidatePoolSize = this.iceCandidatePoolSize,
+                enableDtlsSrtp = this.enableDtlsSrtp
+            };
+            return instance;
+        }
+    }
+
+    [Serializable]
+    struct RTCConfigurationInternal
+    {
+        public RTCIceServer[] iceServers;
+        public OptionalInt iceTransportPolicy;
+        public OptionalInt bundlePolicy;
+        public OptionalInt iceCandidatePoolSize;
+        public OptionalBool enableDtlsSrtp;
     }
 
     /// <summary>
-    ///
+    /// 
     /// </summary>
     public enum CodecInitializationResult
     {
@@ -276,20 +326,36 @@ namespace Unity.WebRTC
         EncoderInitializationFailed
     }
 
+
+    // Log level for webgl jslib
+    public enum DebugLogLevel
+    {
+        None = 0,
+        Error = 1,
+        Warning = 2,
+        Log = 3,
+        CSOnly_Error = 4,
+        CSOnly_Warning = 5,
+        CSOnly_Log = 6,
+        LibOnly_Error = 7,
+        LibOnly_Warning = 8,
+        LibOnly_Log = 9
+    }
+
     /// <summary>
     ///
     /// </summary>
     public static class WebRTC
     {
 #if UNITY_EDITOR_OSX
-        internal const string Lib = "Packages/com.unity.webrtc/Runtime/Plugins/x86_64/webrtc.bundle/Contents/MacOS/webrtc";
+        internal const string Lib = "Packages/com.unity.webrtc/Runtime/Plugins/macOS/webrtc.bundle/Contents/MacOS/webrtc";
 #elif UNITY_EDITOR_LINUX
         internal const string Lib = "Packages/com.unity.webrtc/Runtime/Plugins/x86_64/libwebrtc.so";
 #elif UNITY_EDITOR_WIN
         internal const string Lib = "Packages/com.unity.webrtc/Runtime/Plugins/x86_64/webrtc.dll";
 #elif UNITY_STANDALONE
         internal const string Lib = "webrtc";
-#elif UNITY_IOS
+#elif UNITY_IOS || UNITY_WEBGL
         internal const string Lib = "__Internal";
 #elif UNITY_ANDROID
         internal const string Lib = "webrtc";
@@ -299,8 +365,11 @@ namespace Unity.WebRTC
         internal static Material flipMat;
         private static bool s_limitTextureSize;
 
+        public static DebugLogLevel LogLevel;
+
+
 #if UNITY_EDITOR
-        static public void OnBeforeAssemblyReload()
+        public static void OnBeforeAssemblyReload()
         {
             Dispose();
         }
@@ -311,7 +380,16 @@ namespace Unity.WebRTC
         /// </summary>
         /// <param name="type"></param>
         /// <param name="limitTextureSize"></param>
-        public static void Initialize(EncoderType type = EncoderType.Hardware, bool limitTextureSize = true, bool directAudio = false)
+        public static void Initialize(EncoderType type = EncoderType.Hardware, bool limitTextureSize = true)
+        {
+            if (s_context != null)
+                throw new InvalidOperationException("Already initialized WebRTC.");
+
+            Initialize(type, limitTextureSize, false, false);
+        }
+
+
+        internal static void Initialize(EncoderType type, bool limitTextureSize, bool directAudio, bool forTest)
         {
             // todo(kazuki): Add this event to avoid crash caused by hot-reload.
             // Dispose of all before reloading assembly.
@@ -338,11 +416,17 @@ namespace Unity.WebRTC
                 }
             }
 
+#if !UNITY_WEBGL
             NativeMethods.RegisterDebugLog(DebugLog);
+#else
+            NativeMethods.RegisterDebugLog(LogLevel, DebugLog);
+#endif
+
 #if UNITY_IOS && !UNITY_EDITOR
             NativeMethods.RegisterRenderingWebRTCPlugin();
 #endif
-            s_context = Context.Create(encoderType:type, useDirectAudio:directAudio);
+            s_context = Context.Create(encoderType:type, useDirectAudio:directAudio, forTest:forTest);
+#if !UNITY_WEBGL
             NativeMethods.SetCurrentContext(s_context.self);
             s_syncContext = SynchronizationContext.Current;
             var flipShader = Resources.Load<Shader>("Flip");
@@ -352,8 +436,9 @@ namespace Unity.WebRTC
             }
 
             s_limitTextureSize = limitTextureSize;
+#endif
         }
-
+        
         /// <summary>
         ///
         /// </summary>
@@ -365,8 +450,10 @@ namespace Unity.WebRTC
                 // Wait until all frame rendering is done
                 yield return new WaitForEndOfFrame();
                 {
-                    foreach(var track in VideoStreamTrack.tracks)
+                    foreach (var reference in VideoStreamTrack.s_tracks.Values)
                     {
+                        if (!reference.TryGetTarget(out var track))
+                            continue;
                         if (track.IsEncoderInitialized)
                         {
                             track.Update();
@@ -391,8 +478,11 @@ namespace Unity.WebRTC
                 s_context = null;
             }
             s_syncContext = null;
+#if !UNITY_WEBGL
             NativeMethods.RegisterDebugLog(null);
-
+#else
+            NativeMethods.RegisterDebugLog(DebugLogLevel.None, null);
+#endif
 #if UNITY_EDITOR
             UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
 #endif
@@ -567,11 +657,20 @@ namespace Unity.WebRTC
             }
             return false;
         }
+        internal static void DestroyOnMainThread(UnityEngine.Object obj)
+        {
+            s_syncContext.Post(DestroyImmediate, obj);
+        }
 
         internal static void Sync(IntPtr ptr, Action callback)
         {
+#if !UNITY_WEBGL
             s_syncContext.Post(SendOrPostCallback, new CallbackObject(ptr, callback));
+#else
+            callback();
+#endif
         }
+
         internal static string GetModuleName()
         {
             return System.IO.Path.GetFileName(Lib);
@@ -587,6 +686,13 @@ namespace Unity.WebRTC
             obj.callback();
         }
 
+        static void DestroyImmediate(object state)
+        {
+            var obj = state as UnityEngine.Object;
+            UnityEngine.Object.DestroyImmediate(obj);
+        }
+
+
         internal static IEnumerable<T> Deserialize<T>(IntPtr buf, int length, Func<IntPtr, T> constructor) where T : class
         {
             var array = new IntPtr[length];
@@ -601,11 +707,25 @@ namespace Unity.WebRTC
             return list;
         }
 
+        internal static IEnumerable<T> Deserialize<T>(IntPtr[] array, Func<IntPtr, T> constructor) where T : class
+        {
+            var list = new List<T>();
+            foreach (var ptr in array)
+            {
+                if (ptr == IntPtr.Zero)
+                    UnityEngine.Debug.LogError("IntPtr is zero");
+                list.Add(FindOrCreate(ptr, constructor));
+            }
+            return list;
+        }
+
         internal static T FindOrCreate<T>(IntPtr ptr, Func<IntPtr, T> constructor) where T : class
         {
             if (Context.table.ContainsKey(ptr))
             {
-                return Context.table[ptr] as T;
+                if(Context.table[ptr] is T value)
+                    return value;
+                throw new InvalidCastException($"{ptr} is not {typeof(T).Name}");
             }
             else
             {
@@ -613,11 +733,38 @@ namespace Unity.WebRTC
             }
         }
 
+#if !UNITY_WEBGL
         [AOT.MonoPInvokeCallback(typeof(DelegateDebugLog))]
         static void DebugLog(string str)
         {
             Debug.Log(str);
         }
+
+#else
+        [AOT.MonoPInvokeCallback(typeof(DelegateDebugLog))]
+        static void DebugLog(string level, string msg)
+        {
+            Debug.Log($"{level}:{msg}");
+            if (level == "error") Debug.LogError(msg);
+            if (level == "warning") Debug.LogWarning(msg);
+            if (level == "log") Debug.Log(msg);
+        }
+#endif
+        public static void WriteLine(DebugLogLevel logLevel, string message,
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0,
+        [CallerMemberName] string member = "")
+        {
+            if (((int)LogLevel > 0 && (int)LogLevel <= 3 && (int)logLevel > 0 && (int)logLevel <= (int)LogLevel) ||
+                ((int)LogLevel > 3 && (int)LogLevel <= 6 && (int)logLevel > 3 && (int)logLevel <= (int)LogLevel))
+            {
+                var s = string.Format("[CS] {0}:{1} - {2}: {3}", Path.GetFileName(file), line, member, message);
+                if (logLevel == DebugLogLevel.Error || logLevel == DebugLogLevel.CSOnly_Error) Debug.LogError(s);
+                if (logLevel == DebugLogLevel.Warning || logLevel == DebugLogLevel.CSOnly_Warning) Debug.LogWarning(s);
+                if (logLevel == DebugLogLevel.Log || logLevel == DebugLogLevel.Log) Debug.Log(s);
+            }
+        }
+
 
         internal static Context Context { get { return s_context; } }
         internal static WeakReferenceTable Table { get { return s_context?.table; } }
@@ -669,8 +816,13 @@ namespace Unity.WebRTC
         }
     }
 
+#if !UNITY_WEBGL
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateDebugLog([MarshalAs(UnmanagedType.LPStr)] string str);
+#else
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void DelegateDebugLog([MarshalAs(UnmanagedType.LPStr)] string level, [MarshalAs(UnmanagedType.LPStr)] string msg);
+#endif
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateCreateSDSuccess(IntPtr ptr, RTCSdpType type, [MarshalAs(UnmanagedType.LPStr)] string sdp);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -689,17 +841,28 @@ namespace Unity.WebRTC
     internal delegate void DelegateNativeOnConnectionStateChange(IntPtr ptr, RTCPeerConnectionState state);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeOnIceGatheringChange(IntPtr ptr, RTCIceGatheringState state);
+#if !UNITY_WEBGL
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeOnIceCandidate(IntPtr ptr, [MarshalAs(UnmanagedType.LPStr)] string candidate, [MarshalAs(UnmanagedType.LPStr)] string sdpMid, int sdpMlineIndex);
+#else
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void DelegateNativeOnIceCandidate(IntPtr ptr, IntPtr iceCandidatePtr, [MarshalAs(UnmanagedType.LPStr)] string candidate, [MarshalAs(UnmanagedType.LPStr)] string sdpMid, int sdpMlineIndex);
+#endif
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     //according to JS API naming, use OnNegotiationNeeded instead of OnRenegotiationNeeded
     internal delegate void DelegateNativeOnNegotiationNeeded(IntPtr ptr);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeOnTrack(IntPtr ptr, IntPtr transceiver);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void DelegateNativeOnRemoveTrack(IntPtr ptr, IntPtr receiver);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeOnDataChannel(IntPtr ptr, IntPtr ptrChannel);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeOnMessage(IntPtr ptr, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] bytes, int size);
+#if UNITY_WEBGL
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void DelegateNativeOnTextMessage(IntPtr ptr, IntPtr msg);
+#endif
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeOnOpen(IntPtr ptr);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -708,6 +871,10 @@ namespace Unity.WebRTC
     internal delegate void DelegateNativeMediaStreamOnAddTrack(IntPtr stream, IntPtr track);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void DelegateNativeMediaStreamOnRemoveTrack(IntPtr stream, IntPtr track);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void DelegateAudioReceive(
+        IntPtr track, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] float[] audioData, int size,
+        int sampleRate, int numOfChannels, int numOfFrames);
 
     internal static class NativeMethods
     {
@@ -715,13 +882,31 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern void RegisterRenderingWebRTCPlugin();
 #endif
+
+        public static IntPtr[] ptrToIntPtrArray(IntPtr ptr)
+        {
+            int len = Marshal.ReadInt32(ptr);
+            int[] arr = new int[len];
+            Marshal.Copy(IntPtr.Add(ptr, 4), arr, 0, len);
+            IntPtr[] ret = new IntPtr[len];
+            for (var i = 0; i < len; i++)
+                ret[i] = new IntPtr(arr[i]);
+            return ret;
+        }
+
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool GetHardwareEncoderSupport();
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void RegisterDebugLog(DelegateDebugLog func);
+#else
+        public static void RegisterDebugLog(Action<string> func) { }
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr ContextCreate(int uid, EncoderType encoderType, bool useDirectAudio);
+        public static extern void RegisterDebugLog(DebugLogLevel logLevel, DelegateDebugLog func);
+#endif
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr ContextCreate(int uid, EncoderType encoderType, bool useDirectAudio, [MarshalAs(UnmanagedType.U1)] bool forTest);
         [DllImport(WebRTC.Lib)]
         public static extern void ContextDestroy(int uid);
         [DllImport(WebRTC.Lib)]
@@ -736,30 +921,56 @@ namespace Unity.WebRTC
         public static extern void PeerConnectionRestartIce(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType PeerConnectionSetConfiguration(IntPtr ptr, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string conf);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr ContextCreateDataChannel(IntPtr ptr, IntPtr ptrPeer, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string label, ref RTCDataChannelInitInternal options);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr ContextCreateDataChannel(IntPtr ptr, IntPtr ptrPeer, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string label, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string optionsJson);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void ContextDeleteDataChannel(IntPtr ptr, IntPtr ptrChannel);
+
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr ContextCreateVideoTrack(IntPtr ptr, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string label);
+        public static extern IntPtr ContextCreateAudioTrackSource(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr ContextCreateAudioTrack(IntPtr ptr, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string label);
+        public static extern IntPtr ContextCreateVideoTrackSource(IntPtr ptr);
+#if !UNITY_WEBGL
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr ContextCreateVideoTrack(IntPtr ptr, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string label, IntPtr trackSource);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr ContextCreateVideoTrack(IntPtr self, IntPtr srcTexturePtr, IntPtr dstTexturePtr, int width, int height);
+#endif
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr ContextCreateAudioTrack(IntPtr ptr, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string label, IntPtr trackSource);
         [DllImport(WebRTC.Lib)]
         public static extern void ContextStopMediaStreamTrack(IntPtr context, IntPtr track);
         [DllImport(WebRTC.Lib)]
-        public static extern void ContextDeleteMediaStreamTrack(IntPtr context, IntPtr track);
-        [DllImport(WebRTC.Lib)]
         public static extern void ContextDeleteStatsReport(IntPtr context, IntPtr report);
+        [DllImport(WebRTC.Lib)]
+        public static extern void ContextAddRefPtr(IntPtr context, IntPtr ptr);
+        [DllImport(WebRTC.Lib)]
+        public static extern void ContextDeleteRefPtr(IntPtr context, IntPtr ptr);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void ContextSetVideoEncoderParameter(IntPtr context, IntPtr track, int width, int height, GraphicsFormat format, IntPtr texturePtr);
         [DllImport(WebRTC.Lib)]
         public static extern CodecInitializationResult GetInitializationResult(IntPtr context, IntPtr track);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr PeerConnectionGetConfiguration(IntPtr ptr);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionCreateOffer(IntPtr ptr, ref RTCOfferAnswerOptions options);
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionCreateAnswer(IntPtr ptr, ref RTCOfferAnswerOptions options);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern void PeerConnectionCreateOffer(IntPtr ptr, string options);
+        [DllImport(WebRTC.Lib)]
+        public static extern void PeerConnectionCreateAnswer(IntPtr ptr, string options);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionRegisterCallbackCreateSD(IntPtr ptr, DelegateCreateSDSuccess onSuccess, DelegateCreateSDFailure onFailure);
         [DllImport(WebRTC.Lib)]
@@ -776,22 +987,44 @@ namespace Unity.WebRTC
         public static extern void PeerConnectionRegisterIceGatheringChange(IntPtr ptr, DelegateNativeOnIceGatheringChange callback);
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionRegisterOnIceCandidate(IntPtr ptr, DelegateNativeOnIceCandidate callback);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType PeerConnectionSetLocalDescription(IntPtr context, IntPtr ptr, ref RTCSessionDescription desc, ref IntPtr error);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType PeerConnectionSetLocalDescriptionWithoutDescription(IntPtr context, IntPtr ptr, ref IntPtr error);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType PeerConnectionSetRemoteDescription(IntPtr context, IntPtr ptr, ref RTCSessionDescription desc, ref IntPtr error);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionSetLocalDescription(IntPtr context, IntPtr ptr, RTCSdpType type, string sdp);
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionSetRemoteDescription(IntPtr context, IntPtr ptr, RTCSdpType type, string sdp);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionGetStats(IntPtr ptr);
+#if UNITY_WEBGL
+        [DllImport(WebRTC.Lib)]
+        public static extern void PeerConnectionTrackGetStats(IntPtr ptr, IntPtr track);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionSenderGetStats(IntPtr ptr, IntPtr sender);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void ContextGetSenderCapabilities(IntPtr context, TrackKind kind, out IntPtr capabilities);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern string ContextGetSenderCapabilities(IntPtr context, TrackKind kind);
+#endif
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void ContextGetReceiverCapabilities(IntPtr context, TrackKind kind, out IntPtr capabilities);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern string ContextGetReceiverCapabilities(IntPtr context, TrackKind kind);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionReceiverGetStats(IntPtr sender, IntPtr receiver);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool PeerConnectionGetLocalDescription(IntPtr ptr, ref RTCSessionDescription desc);
@@ -810,21 +1043,45 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool PeerConnectionGetCurrentRemoteDescription(IntPtr ptr, ref RTCSessionDescription desc);
+#else
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionAddTrack(IntPtr pc, IntPtr track, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string streamId);
+        public static extern string PeerConnectionGetLocalDescription(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionAddTransceiver(IntPtr pc, IntPtr track);
+        public static extern string PeerConnectionGetRemoteDescription(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionAddTransceiverWithType(IntPtr pc, TrackKind kind);
+        public static extern string PeerConnectionGetCurrentLocalDescription(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
-        public static extern void PeerConnectionRemoveTrack(IntPtr pc, IntPtr sender);
+        public static extern string PeerConnectionGetCurrentRemoteDescription(IntPtr ptr);
+        [DllImport(WebRTC.Lib)]
+        public static extern string PeerConnectionGetPendingLocalDescription(IntPtr ptr);
+        [DllImport(WebRTC.Lib)]
+        public static extern string PeerConnectionGetPendingRemoteDescription(IntPtr ptr);
+#endif
+#if !UNITY_WEBGL
+        [DllImport(WebRTC.Lib)]
+        public static extern RTCErrorType PeerConnectionAddTrack(IntPtr pc, IntPtr track, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string streamId, out IntPtr sender);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionAddTrack(IntPtr pc, IntPtr track, IntPtr stream);
+#endif
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionAddTransceiver(IntPtr context, IntPtr pc, IntPtr track);
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionAddTransceiverWithType(IntPtr context, IntPtr pc, TrackKind kind);
+        [DllImport(WebRTC.Lib)]
+        public static extern RTCErrorType PeerConnectionRemoveTrack(IntPtr pc, IntPtr sender);
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool PeerConnectionAddIceCandidate(IntPtr ptr, IntPtr candidate);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType CreateIceCandidate(ref RTCIceCandidateInitInternal options, out IntPtr candidate);
+#endif
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreateNativeRTCIceCandidate(string candidate, string sdpMid, int sdpMLineIndex);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType DeleteIceCandidate(IntPtr candidate);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void IceCandidateGetCandidate(IntPtr candidate, out CandidateInternal dst);
         [DllImport(WebRTC.Lib)]
@@ -835,14 +1092,35 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.LPStr)]
         public static extern string IceCandidateGetSdpMid(IntPtr candidate);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern string IceCandidateGetCandidate(IntPtr candidate);
+        [DllImport(WebRTC.Lib)]
+        public static extern int IceCandidateGetSdpLineIndex(IntPtr candidate);
+        [DllImport(WebRTC.Lib)]
+        [return: MarshalAs(UnmanagedType.LPStr)]
+        public static extern string IceCandidateGetSdp(IntPtr candidate);
+        [DllImport(WebRTC.Lib)]
+        [return: MarshalAs(UnmanagedType.LPStr)]
+        public static extern string IceCandidateGetSdpMid(IntPtr candidate);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern RTCPeerConnectionState PeerConnectionState(IntPtr ptr);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionGetReceivers(IntPtr ptr, out ulong length);
+        public static extern IntPtr PeerConnectionGetReceivers(IntPtr context, IntPtr ptr, out ulong length);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionGetSenders(IntPtr ptr, out ulong length);
+        public static extern IntPtr PeerConnectionGetSenders(IntPtr context, IntPtr ptr, out ulong length);
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr PeerConnectionGetTransceivers(IntPtr ptr, out ulong length);
+        public static extern IntPtr PeerConnectionGetTransceivers(IntPtr context, IntPtr ptr, out ulong length);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionGetReceivers(IntPtr context, IntPtr ptr);
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionGetSenders(IntPtr context, IntPtr ptr);
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr PeerConnectionGetTransceivers(IntPtr context, IntPtr ptr);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern RTCIceConnectionState PeerConnectionIceConditionState(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
@@ -856,27 +1134,50 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern void PeerConnectionRegisterOnTrack(IntPtr ptr, DelegateNativeOnTrack callback);
         [DllImport(WebRTC.Lib)]
-        [return: MarshalAs(UnmanagedType.U1)]
-        public static extern bool TransceiverGetCurrentDirection(IntPtr transceiver, ref RTCRtpTransceiverDirection direction);
+        public static extern void PeerConnectionRegisterOnRemoveTrack(IntPtr ptr, DelegateNativeOnRemoveTrack callback);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
-        public static extern bool TransceiverStop(IntPtr transceiver);
+        public static extern bool TransceiverGetCurrentDirection(IntPtr transceiver, ref RTCRtpTransceiverDirection direction);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern int TransceiverGetCurrentDirection(IntPtr transceiver);
+#endif
+        [DllImport(WebRTC.Lib)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        public static extern RTCErrorType TransceiverStop(IntPtr transceiver);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern RTCRtpTransceiverDirection TransceiverGetDirection(IntPtr transceiver);
         [DllImport(WebRTC.Lib)]
         public static extern void TransceiverSetDirection(IntPtr transceiver, RTCRtpTransceiverDirection direction);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType TransceiverSetCodecPreferences(IntPtr transceiver, IntPtr capabilities, long length);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern RTCRtpTransceiverDirection TransceiverGetDirection(IntPtr transceiver);
+        [DllImport(WebRTC.Lib)]
+        public static extern void TransceiverSetDirection(IntPtr transceiver, RTCRtpTransceiverDirection direction);
+        [DllImport(WebRTC.Lib)]
+        public static extern RTCErrorType TransceiverSetCodecPreferences(IntPtr transceiver, string capabilities);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr TransceiverGetReceiver(IntPtr transceiver);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr TransceiverGetSender(IntPtr transceiver);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr SenderGetTrack(IntPtr sender);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void SenderGetParameters(IntPtr sender, out IntPtr parameters);
         [DllImport(WebRTC.Lib)]
         public static extern RTCErrorType SenderSetParameters(IntPtr sender, IntPtr parameters);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern string SenderGetParameters(IntPtr sender);
+        [DllImport(WebRTC.Lib)]
+        public static extern RTCErrorType SenderSetParameters(IntPtr sender, string parameters);
+#endif
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool SenderReplaceTrack(IntPtr sender, IntPtr track);
@@ -912,18 +1213,28 @@ namespace Unity.WebRTC
         public static extern void DataChannelClose(IntPtr ptr);
         [DllImport(WebRTC.Lib)]
         public static extern void DataChannelRegisterOnMessage(IntPtr ptr, DelegateNativeOnMessage callback);
+#if UNITY_WEBGL
+        [DllImport(WebRTC.Lib)]
+        public static extern void DataChannelRegisterOnTextMessage(IntPtr ptr, DelegateNativeOnTextMessage callback);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void DataChannelRegisterOnOpen(IntPtr ptr, DelegateNativeOnOpen callback);
         [DllImport(WebRTC.Lib)]
         public static extern void DataChannelRegisterOnClose(IntPtr ptr, DelegateNativeOnClose callback);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr ContextCreateMediaStream(IntPtr ctx, [MarshalAs(UnmanagedType.LPStr, SizeConst = 256)] string label);
+#if UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
-        public static extern void ContextDeleteMediaStream(IntPtr ctx, IntPtr stream);
+        public static extern void MediaStreamAddUserMedia(IntPtr streamPtr, string constraints);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void ContextRegisterMediaStreamObserver(IntPtr ctx, IntPtr stream);
         [DllImport(WebRTC.Lib)]
         public static extern void ContextUnRegisterMediaStreamObserver(IntPtr ctx, IntPtr stream);
+        [DllImport(WebRTC.Lib)]
+        public static extern void ContextRegisterAudioReceiveCallback(IntPtr context, IntPtr track, DelegateAudioReceive callback);
+        [DllImport(WebRTC.Lib)]
+        public static extern void ContextUnregisterAudioReceiveCallback(IntPtr context, IntPtr track);
         [DllImport(WebRTC.Lib)]
         public static extern EncoderType ContextGetEncoderType(IntPtr context);
         [DllImport(WebRTC.Lib)]
@@ -932,10 +1243,17 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         [return: MarshalAs(UnmanagedType.U1)]
         public static extern bool MediaStreamRemoveTrack(IntPtr stream, IntPtr track);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr MediaStreamGetVideoTracks(IntPtr stream, out ulong length);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr MediaStreamGetAudioTracks(IntPtr stream, out ulong length);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr MediaStreamGetVideoTracks(IntPtr stream);
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr MediaStreamGetAudioTracks(IntPtr stream);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr MediaStreamGetID(IntPtr stream);
         [DllImport(WebRTC.Lib)]
@@ -963,16 +1281,24 @@ namespace Unity.WebRTC
         public static extern void VideoTrackAddOrUpdateSink(IntPtr track, IntPtr sink);
         [DllImport(WebRTC.Lib)]
         public static extern void VideoTrackRemoveSink(IntPtr track, IntPtr sink);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern void SetCurrentContext(IntPtr context);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr GetRenderEventFunc(IntPtr context);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr GetUpdateTextureFunc(IntPtr context);
+#endif
         [DllImport(WebRTC.Lib)]
         public static extern void ProcessAudio(float[] data, int size);
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr StatsReportGetStatsList(IntPtr report, out ulong length, ref IntPtr types);
+#else
+        [DllImport(WebRTC.Lib)]
+        public static extern string StatsReportGetStatsList(IntPtr report);
+#endif
+#if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr StatsGetJson(IntPtr stats);
         [DllImport(WebRTC.Lib)]
@@ -1019,8 +1345,81 @@ namespace Unity.WebRTC
         public static extern IntPtr StatsMemberGetDoubleArray(IntPtr member, out ulong length);
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr StatsMemberGetStringArray(IntPtr member, out ulong length);
+#else
+        public static IntPtr StatsGetJson(IntPtr stats) { return default; }
+        public static IntPtr StatsGetId(IntPtr stats){ return default; }
+        public static RTCStatsType StatsGetType(IntPtr stats){ return default; }
+        public static long StatsGetTimestamp(IntPtr stats){ return default; }
+        public static IntPtr StatsGetMembers(IntPtr stats, out ulong length){ length = default; return default; }
+        public static IntPtr StatsMemberGetName(IntPtr member){ return default; }
+        public static StatsMemberType StatsMemberGetType(IntPtr member){ return default; }
+        public static bool StatsMemberIsDefined(IntPtr member){ return default; }
+        public static bool StatsMemberGetBool(IntPtr member){ return default; }
+        public static int StatsMemberGetInt(IntPtr member){ return default; }
+        public static uint StatsMemberGetUnsignedInt(IntPtr member){ return default; }
+        public static long StatsMemberGetLong(IntPtr member){ return default; }
+        public static ulong StatsMemberGetUnsignedLong(IntPtr member){ return default; }
+        public static double StatsMemberGetDouble(IntPtr member){ return default; }
+        public static IntPtr StatsMemberGetString(IntPtr member){ return default; }
+        public static IntPtr StatsMemberGetBoolArray(IntPtr member, out ulong length){ length = default; return default; }
+        public static IntPtr StatsMemberGetIntArray(IntPtr member, out ulong length){ length = default; return default; }
+        public static IntPtr StatsMemberGetUnsignedIntArray(IntPtr member, out ulong length){ length = default; return default; }
+        public static IntPtr StatsMemberGetLongArray(IntPtr member, out ulong length){ length = default; return default; }
+        public static IntPtr StatsMemberGetUnsignedLongArray(IntPtr member, out ulong length){ length = default; return default; }
+        public static IntPtr StatsMemberGetDoubleArray(IntPtr member, out ulong length){ length = default; return default; }
+        public static IntPtr StatsMemberGetStringArray(IntPtr member, out ulong length){ length = default; return default; }
+#endif
+
+#if UNITY_WEBGL
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern void UnityWebRTCInit(int logLebel);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreateAudioTrack();
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreateVideoTrack();
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreateMediaStream();
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreatePeerConnection();
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreatePeerConnectionWithConfig(string confJson);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern RTCErrorType PeerConnectionSetDescription(IntPtr peerPtr, RTCSdpType type, string sdp, string side);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreateDataChannel();
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr DeleteMediaStream(IntPtr streamPtr);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr DeleteReceiver(IntPtr receiverPtr);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr DeleteSender(IntPtr senderPtr);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr DeleteTransceiver(IntPtr transceiverPtr);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern void RenderLocalVideotrack(IntPtr trackPtr, bool needFlip);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern void UpdateRendererTexture(IntPtr trackPtr, IntPtr renderTexturePtr, bool needFlip);
+        [UnityEngine.Scripting.Preserve]
+        [DllImport(WebRTC.Lib)]
+        public static extern IntPtr CreateNativeTexture();
+#endif
     }
 
+#if !UNITY_WEBGL
     internal static class VideoEncoderMethods
     {
         static UnityEngine.Rendering.CommandBuffer _command = new UnityEngine.Rendering.CommandBuffer();
@@ -1051,9 +1450,11 @@ namespace Unity.WebRTC
             _command.Clear();
         }
     }
+#endif
 
     internal static class VideoDecoderMethods
     {
+#if !UNITY_WEBGL
         static UnityEngine.Rendering.CommandBuffer _command = new UnityEngine.Rendering.CommandBuffer();
 
         public static void UpdateRendererTexture(IntPtr callback, Texture texture, uint rendererId)
@@ -1070,7 +1471,6 @@ namespace Unity.WebRTC
             Graphics.ExecuteCommandBuffer(_command);
             _command.Clear();
         }
+#endif
     }
 }
-
-

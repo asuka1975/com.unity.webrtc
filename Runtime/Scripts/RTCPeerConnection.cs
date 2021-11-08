@@ -2,6 +2,8 @@ using UnityEngine;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
+using Newtonsoft.Json;
 
 namespace Unity.WebRTC
 {
@@ -60,6 +62,7 @@ namespace Unity.WebRTC
 
         private RTCSessionDescriptionAsyncOperation m_opSessionDesc;
         private RTCSessionDescriptionAsyncOperation m_opSetRemoteDesc;
+        private HashSet<MediaStreamTrack> cacheTracks = new HashSet<MediaStreamTrack>();
 
         private bool disposed;
 
@@ -82,7 +85,6 @@ namespace Unity.WebRTC
             {
                 Close();
                 DisposeAllTransceivers();
-                WebRTC.Context.DeletePeerConnection(self);
                 WebRTC.Table.Remove(self);
                 self = IntPtr.Zero;
             }
@@ -98,8 +100,8 @@ namespace Unity.WebRTC
             {
                 // Dispose of MediaStreamTrack when disposing of RTCRtpReceiver.
                 // On the other hand, do not dispose a track when disposing of RTCRtpSender.
+                transceiver.Stop();
                 transceiver.Receiver?.Track?.Dispose();
-
                 transceiver.Receiver?.Dispose();
                 transceiver.Sender?.Dispose();
                 transceiver.Dispose();
@@ -166,8 +168,13 @@ namespace Unity.WebRTC
         /// <seealso cref="GetTransceivers()"/>
         public IEnumerable<RTCRtpReceiver> GetReceivers()
         {
-            IntPtr buf = NativeMethods.PeerConnectionGetReceivers(GetSelfOrThrow(), out ulong length);
+            IntPtr buf = WebRTC.Context.PeerConnectionGetReceivers(GetSelfOrThrow(), out ulong length);
+#if !UNITY_WEBGL
             return WebRTC.Deserialize(buf, (int)length, CreateReceiver);
+#else
+            var arr = NativeMethods.ptrToIntPtrArray(buf);
+            return WebRTC.Deserialize(arr, ptr => new RTCRtpReceiver(ptr, this));
+#endif
         }
 
         /// <summary>
@@ -183,8 +190,13 @@ namespace Unity.WebRTC
         /// <seealso cref="GetTransceivers()"/>
         public IEnumerable<RTCRtpSender> GetSenders()
         {
-            var buf = NativeMethods.PeerConnectionGetSenders(GetSelfOrThrow(), out ulong length);
+            var buf = WebRTC.Context.PeerConnectionGetSenders(GetSelfOrThrow(), out ulong length);
+#if !UNITY_WEBGL
             return WebRTC.Deserialize(buf, (int)length, CreateSender);
+#else
+            var arr = NativeMethods.ptrToIntPtrArray(buf);
+            return WebRTC.Deserialize(arr, ptr => new RTCRtpSender(ptr, this));
+#endif
         }
 
         /// <summary>
@@ -200,8 +212,13 @@ namespace Unity.WebRTC
         /// <seealso cref="GetReceivers()"/>
         public IEnumerable<RTCRtpTransceiver> GetTransceivers()
         {
-            var buf = NativeMethods.PeerConnectionGetTransceivers(GetSelfOrThrow(), out ulong length);
+            var buf = WebRTC.Context.PeerConnectionGetTransceivers(GetSelfOrThrow(), out ulong length);
+#if !UNITY_WEBGL
             return WebRTC.Deserialize(buf, (int)length, CreateTransceiver);
+#else
+            var arr = NativeMethods.ptrToIntPtrArray(buf);
+            return WebRTC.Deserialize(arr, ptr => new RTCRtpTransceiver(ptr, this));
+#endif
         }
 
         RTCRtpReceiver CreateReceiver(IntPtr ptr)
@@ -283,7 +300,11 @@ namespace Unity.WebRTC
         internal DelegateSetSessionDescFailure OnSetSessionDescriptionFailure { get; set; }
 
         [AOT.MonoPInvokeCallback(typeof(DelegateNativeOnIceCandidate))]
+#if !UNITY_WEBGL
         static void PCOnIceCandidate(IntPtr ptr, string sdp, string sdpMid, int sdpMlineIndex)
+#else
+        static void PCOnIceCandidate(IntPtr ptr, IntPtr iceCandidatePtr, string sdp, string sdpMid, int sdpMlineIndex)
+#endif
         {
             WebRTC.Sync(ptr, () =>
             {
@@ -295,7 +316,11 @@ namespace Unity.WebRTC
                         sdpMid = sdpMid,
                         sdpMLineIndex = sdpMlineIndex
                     };
+#if !UNITY_WEBGL
                     var candidate = new RTCIceCandidate(options);
+#else
+                    var candidate = new RTCIceCandidate(options, iceCandidatePtr);
+#endif
                     connection.OnIceCandidate?.Invoke(candidate);
                 }
             });
@@ -368,7 +393,24 @@ namespace Unity.WebRTC
             {
                 if (WebRTC.Table[ptr] is RTCPeerConnection connection)
                 {
-                    connection.OnTrack?.Invoke(new RTCTrackEvent(transceiver, connection));
+                    var e = new RTCTrackEvent(transceiver, connection);
+                    connection.OnTrack?.Invoke(e);
+                    connection.cacheTracks.Add(e.Track);
+                }
+            });
+        }
+
+        [AOT.MonoPInvokeCallback(typeof(DelegateNativeOnRemoveTrack))]
+        static void PCOnRemoveTrack(IntPtr ptr, IntPtr receiverPtr)
+        {
+            WebRTC.Sync(ptr, () =>
+            {
+                if (WebRTC.Table[ptr] is RTCPeerConnection connection)
+                {
+                    var receiver = WebRTC.FindOrCreate(
+                        receiverPtr, _ptr => new RTCRtpReceiver(_ptr, connection));
+                    if (receiver != null)
+                        connection.cacheTracks.Remove(receiver.Track);
                 }
             });
         }
@@ -394,7 +436,8 @@ namespace Unity.WebRTC
         {
             IntPtr ptr = NativeMethods.PeerConnectionGetConfiguration(GetSelfOrThrow());
             string str = ptr.AsAnsiStringWithFreeMem();
-            return JsonUtility.FromJson<RTCConfiguration>(str);
+            var conf = JsonUtility.FromJson<RTCConfigurationInternal>(str);
+            return new RTCConfiguration(ref conf);
         }
 
         /// <summary>
@@ -430,7 +473,9 @@ namespace Unity.WebRTC
         /// <seealso cref="GetConfiguration()"/>
         public RTCErrorType SetConfiguration(ref RTCConfiguration configuration)
         {
-            return NativeMethods.PeerConnectionSetConfiguration(GetSelfOrThrow(), JsonUtility.ToJson(configuration));
+            var conf_ = configuration.Cast();
+            string str = JsonUtility.ToJson(conf_);
+            return NativeMethods.PeerConnectionSetConfiguration(GetSelfOrThrow(), str);
         }
 
         /// <summary>
@@ -457,7 +502,8 @@ namespace Unity.WebRTC
         /// <seealso cref="RTCPeerConnection()"/>
         public RTCPeerConnection(ref RTCConfiguration configuration)
         {
-            string configStr = JsonUtility.ToJson(configuration);
+            var conf_ = configuration.Cast();
+            string configStr = JsonUtility.ToJson(conf_);
             self = WebRTC.Context.CreatePeerConnection(configStr);
             if (self == IntPtr.Zero)
             {
@@ -479,6 +525,7 @@ namespace Unity.WebRTC
             NativeMethods.PeerConnectionRegisterOnDataChannel(self, PCOnDataChannel);
             NativeMethods.PeerConnectionRegisterOnRenegotiationNeeded(self, PCOnNegotiationNeeded);
             NativeMethods.PeerConnectionRegisterOnTrack(self, PCOnTrack);
+            NativeMethods.PeerConnectionRegisterOnRemoveTrack(self, PCOnRemoveTrack);
             WebRTC.Context.PeerConnectionRegisterOnSetSessionDescSuccess(
                 self, OnSetSessionDescSuccess);
             WebRTC.Context.PeerConnectionRegisterOnSetSessionDescFailure(
@@ -513,9 +560,21 @@ namespace Unity.WebRTC
                 throw new ArgumentNullException("");
             }
 
+#if !UNITY_WEBGL
             var streamId = stream == null ? Guid.NewGuid().ToString() : stream.Id;
-            IntPtr ptr = NativeMethods.PeerConnectionAddTrack(
-                GetSelfOrThrow(), track.GetSelfOrThrow(), streamId);
+            RTCErrorType error = NativeMethods.PeerConnectionAddTrack(
+                GetSelfOrThrow(), track.GetSelfOrThrow(), streamId, out var ptr);
+
+#else
+            var streamPtr = stream == null ? IntPtr.Zero : stream.GetSelfOrThrow();
+            IntPtr buf = NativeMethods.PeerConnectionAddTrack(GetSelfOrThrow(), track.GetSelfOrThrow(), streamPtr);
+            var arr = NativeMethods.ptrToIntPtrArray(buf);
+            RTCErrorType error = (RTCErrorType) arr[0];
+            var ptr = arr[1];
+#endif
+            if (error != RTCErrorType.None)
+                throw new InvalidOperationException($"error occurred :{error}");
+            cacheTracks.Add(track);
             return CreateSender(ptr);
         }
 
@@ -524,10 +583,10 @@ namespace Unity.WebRTC
         /// </summary>
         /// <param name="sender"></param>
         /// <seealso cref="AddTrack"/>
-        public void RemoveTrack(RTCRtpSender sender)
+        public RTCErrorType RemoveTrack(RTCRtpSender sender)
         {
-            NativeMethods.PeerConnectionRemoveTrack(
-                GetSelfOrThrow(), sender.self);
+            cacheTracks.Remove(sender.Track);
+            return NativeMethods.PeerConnectionRemoveTrack(GetSelfOrThrow(), sender.self);
         }
 
         /// <summary>
@@ -537,7 +596,7 @@ namespace Unity.WebRTC
         /// <returns></returns>
         public RTCRtpTransceiver AddTransceiver(MediaStreamTrack track)
         {
-            IntPtr ptr = NativeMethods.PeerConnectionAddTransceiver(
+            IntPtr ptr = WebRTC.Context.PeerConnectionAddTransceiver(
                 GetSelfOrThrow(), track.GetSelfOrThrow());
             return CreateTransceiver(ptr);
         }
@@ -549,7 +608,7 @@ namespace Unity.WebRTC
         /// <returns></returns>
         public RTCRtpTransceiver AddTransceiver(TrackKind kind)
         {
-            IntPtr ptr = NativeMethods.PeerConnectionAddTransceiverWithType(
+            IntPtr ptr = WebRTC.Context.PeerConnectionAddTransceiverWithType(
                 GetSelfOrThrow(), kind);
             return CreateTransceiver(ptr);
         }
@@ -574,14 +633,24 @@ namespace Unity.WebRTC
         public RTCSessionDescriptionAsyncOperation CreateOffer(ref RTCOfferAnswerOptions options)
         {
             m_opSessionDesc = new RTCSessionDescriptionAsyncOperation();
+#if !UNITY_WEBGL
             NativeMethods.PeerConnectionCreateOffer(GetSelfOrThrow(), ref options);
+#else
+            string offer = JsonUtility.ToJson(options);
+            NativeMethods.PeerConnectionCreateOffer(GetSelfOrThrow(), offer);
+#endif
             return m_opSessionDesc;
         }
 
         public RTCSessionDescriptionAsyncOperation CreateOffer()
         {
             m_opSessionDesc = new RTCSessionDescriptionAsyncOperation();
+#if !UNITY_WEBGL
             NativeMethods.PeerConnectionCreateOffer(GetSelfOrThrow(), ref RTCOfferAnswerOptions.Default);
+#else
+            string offer = JsonUtility.ToJson(RTCOfferAnswerOptions.Default);
+            NativeMethods.PeerConnectionCreateOffer(GetSelfOrThrow(), offer);
+#endif
             return m_opSessionDesc;
         }
 
@@ -594,14 +663,24 @@ namespace Unity.WebRTC
         public RTCSessionDescriptionAsyncOperation CreateAnswer(ref RTCOfferAnswerOptions options)
         {
             m_opSessionDesc = new RTCSessionDescriptionAsyncOperation();
+#if !UNITY_WEBGL
             NativeMethods.PeerConnectionCreateAnswer(GetSelfOrThrow(), ref options);
+#else
+            string answer = JsonUtility.ToJson(options);
+            NativeMethods.PeerConnectionCreateAnswer(GetSelfOrThrow(), answer);
+#endif
             return m_opSessionDesc;
         }
 
         public RTCSessionDescriptionAsyncOperation CreateAnswer()
         {
             m_opSessionDesc = new RTCSessionDescriptionAsyncOperation();
+#if !UNITY_WEBGL
             NativeMethods.PeerConnectionCreateAnswer(GetSelfOrThrow(), ref RTCOfferAnswerOptions.Default);
+#else
+            string answer = JsonUtility.ToJson(RTCOfferAnswerOptions.Default);
+            NativeMethods.PeerConnectionCreateAnswer(GetSelfOrThrow(), answer);
+#endif
             return m_opSessionDesc;
         }
 
@@ -630,7 +709,10 @@ namespace Unity.WebRTC
             {
                 if (WebRTC.Table[ptr] is RTCPeerConnection connection)
                 {
-                    connection.m_opSessionDesc.Desc = new RTCSessionDescription { sdp = sdp, type = type };
+                    connection.m_opSessionDesc.Desc = new RTCSessionDescription
+                    {
+                        sdp = sdp, type = type
+                    };
                     connection.m_opSessionDesc.Done();
                 }
             });
@@ -644,7 +726,10 @@ namespace Unity.WebRTC
                 if (WebRTC.Table[ptr] is RTCPeerConnection connection)
                 {
                     connection.m_opSessionDesc.IsError = true;
-                    connection.m_opSessionDesc.Error = new RTCError{errorType = type, message = message};
+                    connection.m_opSessionDesc.Error = new RTCError
+                    {
+                        errorType = type, message = message
+                    };
                     connection.m_opSessionDesc.Done();
                 }
             });
@@ -671,12 +756,11 @@ namespace Unity.WebRTC
         public RTCSetSessionDescriptionAsyncOperation SetLocalDescription(
             ref RTCSessionDescription desc)
         {
-            if(string.IsNullOrEmpty(desc.sdp))
+            if (string.IsNullOrEmpty(desc.sdp))
                 throw new ArgumentException("sdp is null or empty");
 
             var op = new RTCSetSessionDescriptionAsyncOperation(this);
-            RTCError error = WebRTC.Context.PeerConnectionSetLocalDescription(
-                GetSelfOrThrow(), ref desc);
+            RTCError error = WebRTC.Context.PeerConnectionSetLocalDescription(GetSelfOrThrow(), ref desc);
             if (error.errorType == RTCErrorType.None)
             {
                 return op;
@@ -720,8 +804,7 @@ namespace Unity.WebRTC
                 throw new ArgumentException("sdp is null or empty");
 
             var op = new RTCSetSessionDescriptionAsyncOperation(this);
-            RTCError error = WebRTC.Context.PeerConnectionSetRemoteDescription(
-                GetSelfOrThrow(), ref desc);
+            RTCError error = WebRTC.Context.PeerConnectionSetRemoteDescription(GetSelfOrThrow(), ref desc);
             if (error.errorType == RTCErrorType.None)
             {
                 return op;
@@ -757,6 +840,12 @@ namespace Unity.WebRTC
         {
             return new RTCStatsReportAsyncOperation(this);
         }
+#if UNITY_WEBGL
+        public RTCStatsReportAsyncOperation GetStats(MediaStreamTrack track)
+        {
+            return new RTCStatsReportAsyncOperation(this, track);
+        }
+#endif
 
         internal RTCStatsReportAsyncOperation GetStats(RTCRtpSender sender)
         {
@@ -775,10 +864,19 @@ namespace Unity.WebRTC
             get
             {
                 RTCSessionDescription desc = default;
+#if !UNITY_WEBGL
                 if (NativeMethods.PeerConnectionGetLocalDescription(GetSelfOrThrow(), ref desc))
                 {
                     return desc;
                 }
+#else
+                string ret = NativeMethods.PeerConnectionGetLocalDescription(GetSelfOrThrow());
+                if(!"false".Equals(ret))
+                {
+                    desc = JsonConvert.DeserializeObject<RTCSessionDescription>(ret);
+                    return desc;
+                }
+#endif
                 throw new InvalidOperationException("LocalDescription is not exist");
             }
         }
@@ -791,10 +889,19 @@ namespace Unity.WebRTC
             get
             {
                 RTCSessionDescription desc = default;
+#if !UNITY_WEBGL
                 if (NativeMethods.PeerConnectionGetRemoteDescription(GetSelfOrThrow(), ref desc))
                 {
                     return desc;
                 }
+#else
+                string ret = NativeMethods.PeerConnectionGetRemoteDescription(GetSelfOrThrow());
+                if(!"false".Equals(ret))
+                {
+                    desc = JsonConvert.DeserializeObject<RTCSessionDescription>(ret);
+                    return desc;
+                }
+#endif
                 throw new InvalidOperationException("RemoteDescription is not exist");
             }
         }
@@ -807,10 +914,19 @@ namespace Unity.WebRTC
             get
             {
                 RTCSessionDescription desc = default;
+#if !UNITY_WEBGL
                 if (NativeMethods.PeerConnectionGetCurrentLocalDescription(GetSelfOrThrow(), ref desc))
                 {
                     return desc;
                 }
+#else
+                string ret = NativeMethods.PeerConnectionGetCurrentLocalDescription(GetSelfOrThrow());
+                if(!"false".Equals(ret))
+                {
+                    desc = JsonConvert.DeserializeObject<RTCSessionDescription>(ret);
+                    return desc;
+                }
+#endif
                 throw new InvalidOperationException("CurrentLocalDescription is not exist");
             }
         }
@@ -820,10 +936,19 @@ namespace Unity.WebRTC
             get
             {
                 RTCSessionDescription desc = default;
+#if !UNITY_WEBGL
                 if (NativeMethods.PeerConnectionGetCurrentRemoteDescription(GetSelfOrThrow(), ref desc))
                 {
                     return desc;
                 }
+#else
+                string ret = NativeMethods.PeerConnectionGetCurrentRemoteDescription(GetSelfOrThrow());
+                if(!"false".Equals(ret))
+                {
+                    desc = JsonConvert.DeserializeObject<RTCSessionDescription>(ret);
+                    return desc;
+                }
+#endif
                 throw new InvalidOperationException("CurrentRemoteDescription is not exist");
             }
         }
@@ -836,10 +961,19 @@ namespace Unity.WebRTC
             get
             {
                 RTCSessionDescription desc = default;
+#if !UNITY_WEBGL
                 if (NativeMethods.PeerConnectionGetPendingLocalDescription(GetSelfOrThrow(), ref desc))
                 {
                     return desc;
                 }
+#else
+                string ret = NativeMethods.PeerConnectionGetPendingLocalDescription(GetSelfOrThrow());
+                if(!"false".Equals(ret))
+                {
+                    desc = JsonConvert.DeserializeObject<RTCSessionDescription>(ret);
+                    return desc;
+                }
+#endif
                 throw new InvalidOperationException("PendingLocalDescription is not exist");
             }
         }
@@ -852,10 +986,19 @@ namespace Unity.WebRTC
             get
             {
                 RTCSessionDescription desc = default;
+#if !UNITY_WEBGL
                 if (NativeMethods.PeerConnectionGetPendingRemoteDescription(GetSelfOrThrow(), ref desc))
                 {
                     return desc;
                 }
+#else
+                string ret = NativeMethods.PeerConnectionGetPendingRemoteDescription(GetSelfOrThrow());
+                if(!"false".Equals(ret))
+                {
+                    desc = JsonConvert.DeserializeObject<RTCSessionDescription>(ret);
+                    return desc;
+                }
+#endif
                 throw new InvalidOperationException("PendingRemoteDescription is not exist");
             }
         }
@@ -879,7 +1022,10 @@ namespace Unity.WebRTC
             {
                 if (WebRTC.Table[ptr] is RTCPeerConnection connection)
                 {
-                    RTCError error = new RTCError { errorType = type, message = message };
+                    RTCError error = new RTCError
+                    {
+                        errorType = type, message = message
+                    };
                     connection.OnSetSessionDescriptionFailure(error);
                 }
             });

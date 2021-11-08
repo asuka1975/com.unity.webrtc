@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.16)
 
 # set default DEPLOYMENT_TARGET version for iOS platform
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
