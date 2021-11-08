@@ -186,7 +186,7 @@ namespace Unity.WebRTC
             unsafe
             {
                 void* ptr = nativeArray.GetUnsafeReadOnlyPtr();
-                NativeMethods.ProcessAudio(GetSelfOrThrow(), (IntPtr)ptr, sampleRate, channels, nativeArray.Length);
+                NativeMethods.ProcessAudioUseUnityAudioTrack(GetSelfOrThrow(), (IntPtr)ptr, sampleRate, channels, nativeArray.Length);
             }
         }
 #endif
@@ -202,7 +202,7 @@ namespace Unity.WebRTC
             unsafe
             {
                 void* ptr = nativeArray.GetUnsafeReadOnlyPtr();
-                NativeMethods.ProcessAudio(GetSelfOrThrow(), (IntPtr)ptr, sampleRate, channels, nativeArray.Length);
+                NativeMethods.ProcessAudioUseUnityAudioTrack(GetSelfOrThrow(), (IntPtr)ptr, sampleRate, channels, nativeArray.Length);
             }
         }
 
@@ -216,7 +216,7 @@ namespace Unity.WebRTC
             unsafe
             {
                 void* ptr = nativeSlice.GetUnsafeReadOnlyPtr();
-                NativeMethods.ProcessAudio(GetSelfOrThrow(), (IntPtr)ptr, sampleRate, channels, nativeSlice.Length);
+                NativeMethods.ProcessAudioUseUnityAudioTrack(GetSelfOrThrow(), (IntPtr)ptr, sampleRate, channels, nativeSlice.Length);
             }
         }
 

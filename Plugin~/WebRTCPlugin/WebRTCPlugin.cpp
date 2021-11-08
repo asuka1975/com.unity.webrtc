@@ -1376,6 +1376,21 @@ extern "C"
         }
     }
 
+    UNITY_INTERFACE_EXPORT void ProcessAudioUseUnityAudioTrack(
+        AudioTrackInterface* track,
+        float* audio_data,
+        int32 sample_rate,
+        int32 number_of_channels,
+        int32 number_of_frames)
+    {
+        UnityAudioTrackSource* source =
+            static_cast<UnityAudioTrackSource*>(track->GetSource());
+
+        source->OnData(audio_data,
+            sample_rate,
+            number_of_channels,
+            number_of_frames);
+    }
 
     UNITY_INTERFACE_EXPORT void ContextRegisterAudioReceiveCallback(
         Context* context, AudioTrackInterface* track, DelegateAudioReceive callback)

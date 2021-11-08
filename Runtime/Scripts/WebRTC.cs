@@ -1291,6 +1291,8 @@ namespace Unity.WebRTC
 #endif
         [DllImport(WebRTC.Lib)]
         public static extern void ProcessAudio(float[] data, int size);
+        [DllImport(WebRTC.Lib)]
+        public static extern void ProcessAudioUseUnityAudioTrack(IntPtr track, IntPtr array, int sampleRate, int channels, int frames);
 #if !UNITY_WEBGL
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr StatsReportGetStatsList(IntPtr report, out ulong length, ref IntPtr types);
