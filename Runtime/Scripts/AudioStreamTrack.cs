@@ -306,7 +306,7 @@ namespace Unity.WebRTC
         {
             if (started)
             {
-                NativeMethods.ProcessAudio(audioData, audioData.Length);
+                NativeMethods.ProcessAudioWithContextManager(audioData, audioData.Length);
             }
         }
 
