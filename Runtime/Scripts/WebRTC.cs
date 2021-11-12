@@ -385,7 +385,7 @@ namespace Unity.WebRTC
             if (s_context != null)
                 throw new InvalidOperationException("Already initialized WebRTC.");
 
-            Initialize(type, limitTextureSize, false);
+            Initialize(type, limitTextureSize, false, false);
         }
 
 
@@ -1289,6 +1289,8 @@ namespace Unity.WebRTC
         [DllImport(WebRTC.Lib)]
         public static extern IntPtr GetUpdateTextureFunc(IntPtr context);
 #endif
+        [DllImport(WebRTC.Lib)]
+        public static extern void ProcessAudioWithContextManager(float[] data, int size);
         [DllImport(WebRTC.Lib)]
         public static extern void ProcessAudio(IntPtr track, IntPtr array, int sampleRate, int channels, int frames);
 #if !UNITY_WEBGL

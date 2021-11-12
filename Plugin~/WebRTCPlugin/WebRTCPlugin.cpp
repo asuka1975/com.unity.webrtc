@@ -1367,6 +1367,14 @@ extern "C"
         ContextManager::GetInstance()->curContext = context;
     }
 
+    UNITY_INTERFACE_EXPORT void ProcessAudioWithContextManager(float* data, int32 size)
+    {
+        if (ContextManager::GetInstance()->curContext)
+        {
+            ContextManager::GetInstance()->curContext->ProcessAudioData(data, size);
+        }
+    }
+
     UNITY_INTERFACE_EXPORT void ProcessAudio(
         AudioTrackInterface* track,
         float* audio_data,
