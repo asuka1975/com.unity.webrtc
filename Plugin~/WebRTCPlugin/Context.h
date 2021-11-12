@@ -26,7 +26,7 @@ namespace webrtc
         static ContextManager* GetInstance() { return &s_instance; }
      
         Context* GetContext(int uid) const;
-        Context* CreateContext(int uid, UnityEncoderType encoderType, bool forTest);
+        Context* CreateContext(int uid, UnityEncoderType encoderType, bool useDirectAudio, bool forTest);
         void DestroyContext(int uid);
         void SetCurContext(Context*);
         bool Exists(Context* context);
@@ -58,7 +58,7 @@ namespace webrtc
     {
     public:
         
-        explicit Context(int uid = -1, UnityEncoderType encoderType = UnityEncoderHardware, bool forTest = false);
+        explicit Context(int uid = -1, UnityEncoderType encoderType = UnityEncoderHardware, bool useDirectAudio = false, bool forTest = false);
         ~Context();
 
         // Utility
@@ -89,6 +89,7 @@ namespace webrtc
         void RegisterMediaStreamObserver(webrtc::MediaStreamInterface* stream);
         void UnRegisterMediaStreamObserver(webrtc::MediaStreamInterface* stream);
         MediaStreamObserver* GetObserver(const webrtc::MediaStreamInterface* stream);
+        void ProcessAudioData(const float* data, int32 size);
 
         // Audio Source
         webrtc::AudioSourceInterface* CreateAudioSource();

@@ -36,14 +36,14 @@ namespace webrtc
         return nullptr;
     }
 
-    Context* ContextManager::CreateContext(int uid, UnityEncoderType encoderType, bool forTest)
+    Context* ContextManager::CreateContext(int uid, UnityEncoderType encoderType, bool useDirectAudio, bool forTest)
     {
         auto it = s_instance.m_contexts.find(uid);
         if (it != s_instance.m_contexts.end()) {
             DebugLog("Using already created context with ID %d", uid);
             return nullptr;
         }
-        auto ctx = new Context(uid, encoderType, forTest);
+        auto ctx = new Context(uid, encoderType, useDirectAudio, forTest);
         s_instance.m_contexts[uid].reset(ctx);
         return ctx;
     }
@@ -180,7 +180,7 @@ namespace webrtc
     }
 #pragma warning(pop)
 
-    Context::Context(int uid, UnityEncoderType encoderType, bool forTest)
+    Context::Context(int uid, UnityEncoderType encoderType, bool useDirectAudio, bool forTest)
         : m_uid(uid)
         , m_encoderType(encoderType)
     {
@@ -191,12 +191,21 @@ namespace webrtc
 
         rtc::InitializeSSL();
 
-        m_workerThread->Invoke<void>(
-            RTC_FROM_HERE,
-            [this]()
-            {
-                m_audioDevice = new rtc::RefCountedObject<DummyAudioDevice>();
-            });
+        if(useDirectAudio) {
+            // For this case we don't bother to create a DummyAudioDevice
+            // because when CreatePeerConnectionFactory() is supplied with a null
+            // AudioDeviceModule pointer... webrtc will create the default
+            // module under the hood and that will speak directly hardware.
+        } else {
+            m_workerThread->Invoke<void>(
+                RTC_FROM_HERE,
+                [this]()
+                {
+                    m_audioDevice = new rtc::RefCountedObject<DummyAudioDevice>();
+                });
+        }
+
+        
 
         std::unique_ptr<webrtc::VideoEncoderFactory> videoEncoderFactory =
             m_encoderType == UnityEncoderType::UnityEncoderHardware ?
@@ -441,6 +450,12 @@ namespace webrtc
         AudioTrackSinkInterface* sink = m_mapAudioTrackAndSink[track].get();
         track->RemoveSink(sink);
         m_mapAudioTrackAndSink.erase(track);
+    }
+
+    void Context::ProcessAudioData(const float* data, int32 size) {
+        if(m_audioDevice) {
+            m_audioDevice->ProcessAudioData(data, size);
+        }
     }
 
     void Context::AddStatsReport(const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report)

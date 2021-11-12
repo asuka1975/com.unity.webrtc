@@ -389,7 +389,7 @@ namespace Unity.WebRTC
         }
 
 
-        internal static void Initialize(EncoderType type, bool limitTextureSize, bool forTest)
+        internal static void Initialize(EncoderType type, bool limitTextureSize, bool directAudio, bool forTest)
         {
             // todo(kazuki): Add this event to avoid crash caused by hot-reload.
             // Dispose of all before reloading assembly.
@@ -425,7 +425,7 @@ namespace Unity.WebRTC
 #if UNITY_IOS && !UNITY_EDITOR
             NativeMethods.RegisterRenderingWebRTCPlugin();
 #endif
-            s_context = Context.Create(encoderType:type, forTest:forTest);
+            s_context = Context.Create(encoderType:type, useDirectAudio:directAudio, forTest:forTest);
 #if !UNITY_WEBGL
             NativeMethods.SetCurrentContext(s_context.self);
             s_syncContext = SynchronizationContext.Current;
@@ -906,7 +906,7 @@ namespace Unity.WebRTC
         public static extern void RegisterDebugLog(DebugLogLevel logLevel, DelegateDebugLog func);
 #endif
         [DllImport(WebRTC.Lib)]
-        public static extern IntPtr ContextCreate(int uid, EncoderType encoderType, [MarshalAs(UnmanagedType.U1)] bool forTest);
+        public static extern IntPtr ContextCreate(int uid, EncoderType encoderType, bool useDirectAudio, [MarshalAs(UnmanagedType.U1)] bool forTest);
         [DllImport(WebRTC.Lib)]
         public static extern void ContextDestroy(int uid);
         [DllImport(WebRTC.Lib)]

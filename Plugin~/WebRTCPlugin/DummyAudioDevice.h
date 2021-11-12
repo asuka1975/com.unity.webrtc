@@ -17,6 +17,8 @@ namespace webrtc
     class DummyAudioDevice : public webrtc::AudioDeviceModule
     {
     public:
+        void ProcessAudioData(const float* data, int32 size);
+
         //webrtc::AudioDeviceModule
         // Retrieve the currently utilized audio layer
         virtual int32 ActiveAudioLayer(AudioLayer* audioLayer) const override
@@ -30,19 +32,23 @@ namespace webrtc
             std::lock_guard<std::mutex> lock(mutex_);
 
             audio_transport_ = transport;
+            deviceBuffer->RegisterAudioCallback(transport);
             return 0;
         }
 
         // Main initialization and termination
         virtual int32 Init() override
         {
+            deviceBuffer = std::make_unique<webrtc::AudioDeviceBuffer>(webrtc::CreateDefaultTaskQueueFactory().get());
             initialized_ = true;
             return 0;
         }
         virtual int32 Terminate() override
         {
+            deviceBuffer.reset();
             initialized_ = false;
             playing_ = false;
+            recording_ = false;
             return 0;
         }
         virtual bool Initialized() const override
@@ -109,11 +115,14 @@ namespace webrtc
         }
         virtual int32 InitRecording() override
         {
+            recording_ = true;
+            deviceBuffer->SetRecordingSampleRate(48000);
+            deviceBuffer->SetRecordingChannels(2);
             return 0;
         }
         virtual bool RecordingIsInitialized() const override
         {
-            return false;
+            return recording_;
         }
 
         // Audio transport control
@@ -148,7 +157,7 @@ namespace webrtc
         }
         virtual bool Recording() const override
         {
-            return false;
+            return recording_;
         }
 
         // Audio mixer initialization
@@ -317,9 +326,12 @@ namespace webrtc
 
         std::atomic<bool> initialized_ {false};
         std::atomic<bool> playing_ {false};
+        std::atomic<bool> recording_ {false};
         std::mutex mutex_;
         std::unique_ptr<rtc::Thread> playoutAudioThread_;
         int64_t lastCallRecordMillis_ = 0;
+        std::unique_ptr<webrtc::AudioDeviceBuffer> deviceBuffer;
+        std::vector<int16> convertedAudioData;
 
         webrtc::AudioTransport* audio_transport_ = nullptr;
     };
