@@ -287,4 +287,35 @@ namespace Unity.WebRTC
             base.Dispose();
         }
     }
+
+    public static class Audio
+    {
+        private static bool started;
+
+        public static MediaStream CaptureStream(string streamlabel = "audiostream", string label="audio")
+        {
+            started = true;
+
+            var stream = new MediaStream(WebRTC.Context.CreateMediaStream(streamlabel));
+            var track = new AudioStreamTrack(label, new AudioTrackSource());
+            stream.AddTrack(track);
+            return stream;
+        }
+
+        public static void Update(float[] audioData, int channels)
+        {
+            if (started)
+            {
+                NativeMethods.ProcessAudio(audioData, audioData.Length);
+            }
+        }
+
+        public static void Stop()
+        {
+            if (started)
+            {
+                started = false;
+            }
+        }
+    }
 }
